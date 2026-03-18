@@ -14,7 +14,10 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "README.md",
+    "README_zh.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "vite build",
@@ -50,5 +53,30 @@
     "vue": "^3.5.0",
     "ws": "^8.19.0"
   },
-  "license": "MIT"
+  "keywords": [
+    "vite",
+    "plugin",
+    "ai",
+    "browser",
+    "automation",
+    "agent",
+    "pilot",
+    "dev-tools",
+    "claude"
+  ],
+  "author": "2234839",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2234839/vite-plugin-pilot.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "actions": {
+    "node-version": "24"
+  }
 }

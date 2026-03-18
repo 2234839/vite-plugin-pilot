@@ -1,0 +1,77 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Build docs site
+        run: |
+          mkdir -p docs-site
+          cp README.md docs-site/index.md
+          echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>vite-plugin-pilot</title><style>body{font-family:system-ui,sans-serif;max-width:800px;margin:0 auto;padding:2rem;line-height:1.6;color:#333}a{color:#3b82f6}code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:0.9em}pre{background:#1e293b;color:#e2e8f0;padding:1rem;border-radius:8px;overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{border:1px solid #e5e7eb;padding:8px;text-align:left}</style></head><body>' > docs-site/index.html
+          node -e "
+            const fs = require('fs');
+            const md = fs.readFileSync('docs-site/index.md', 'utf8');
+            // Simple markdown-to-HTML: headings, code blocks, tables, links, bold, lists
+            let html = md
+              .replace(/^### (.+)$/gm, '<h3>\$1</h3>')
+              .replace(/^## (.+)$/gm, '<h2>\$1</h2>')
+              .replace(/^# (.+)$/gm, '<h1>\$1</h1>')
+              .replace(/\*\*(.+?)\*\*/g, '<strong>\$1</strong>')
+              .replace(/\`([^\`]+)\`/g, '<code>\$1</code>')
+              .replace(/^\`\`\`(\w*)\n([\s\S]*?)\`\`\`/gm, '<pre><code>\$2</code></pre>')
+              .replace(/^\|(.+)\|$/gm, (m, line) => {
+                const cells = line.split('|').filter(c => c.trim());
+                if (cells.every(c => /^[-:]+$/.test(c.trim()))) return '';
+                const tag = cells.length > 0 ? 'td' : 'td';
+                return '<tr>' + cells.map(c => '<' + tag + '>' + c.trim() + '</' + tag + '>').join('') + '</tr>';
+              })
+              .replace(/(<tr>[\s\S]*?<\/tr>)/g, '<table>\$1</table>')
+              .replace(/^\- (.+)$/gm, '<li>\$1</li>')
+              .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href=\"\$2\">\$1</a>')
+              .replace(/\n\n/g, '</p><p>')
+              .replace(/\n/g, '<br>');
+            html = '<p>' + html + '</p>';
+            fs.writeFileSync('docs-site/index.html', html);
+          "
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './docs-site'
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
