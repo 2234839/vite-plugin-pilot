@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pilot Playground - Vanilla JS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+    h1 { margin-bottom: 20px; }
+    section { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    h2 { font-size: 16px; color: #374151; margin-bottom: 12px; }
+    .counter { display: flex; align-items: center; gap: 12px; }
+    .counter span { font-size: 24px; min-width: 60px; text-align: center; }
+    button { padding: 6px 16px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; }
+    button:hover { background: #f3f4f6; }
+    input, select, textarea { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+    .todo-input { display: flex; gap: 8px; }
+    .todo-input input { flex: 1; }
+    .todo-list { list-style: none; margin-top: 8px; }
+    .todo-list li { padding: 8px 0; border-bottom: 1px solid #f3f4f6; display: flex; justify-content: space-between; }
+    .todo-list li .done { text-decoration: line-through; color: #9ca3af; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; margin-bottom: 4px; font-size: 14px; color: #6b7280; }
+    .result { margin-top: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 14px; }
+    .tabs { display: flex; gap: 0; margin-bottom: 12px; }
+    .tab { padding: 8px 16px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; font-size: 14px; }
+    .tab:first-child { border-radius: 6px 0 0 6px; }
+    .tab:last-child { border-radius: 0 6px 6px 0; }
+    .tab.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .color-picker { display: flex; gap: 8px; align-items: center; }
+    .color-box { width: 40px; height: 40px; border-radius: 6px; border: 2px solid #e5e7eb; }
+    .timer { font-size: 32px; font-variant-numeric: tabular-nums; }
+    .timer-controls { display: flex; gap: 8px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Vanilla JS Playground</h1>
+
+  <section>
+    <h2>计数器</h2>
+    <div class="counter">
+      <button id="dec">-</button>
+      <span id="count">0</span>
+      <button id="inc">+</button>
+      <button id="reset-count">重置</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Todo 列表</h2>
+    <div class="todo-input">
+      <input id="todo-input" placeholder="输入新任务..." />
+      <button id="add-todo">添加</button>
+    </div>
+    <ul class="todo-list" id="todo-list">
+      <li><span>学习 JavaScript</span><button class="del-todo">删除</button></li>
+      <li><span>练习 DOM 操作</span><button class="del-todo">删除</button></li>
+      <li><span>构建小项目</span><button class="del-todo">删除</button></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>表单</h2>
+    <div class="form-group">
+      <label>姓名</label>
+      <input id="name-input" placeholder="请输入姓名" />
+    </div>
+    <div class="form-group">
+      <label>角色</label>
+      <select id="role-select">
+        <option value="">请选择</option>
+        <option value="dev">开发者</option>
+        <option value="designer">设计师</option>
+        <option value="pm">产品经理</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>备注</label>
+      <textarea id="note-textarea" placeholder="请输入备注..."></textarea>
+    </div>
+    <div class="form-group">
+      <label><input type="checkbox" id="agree-check" /> 同意条款</label>
+    </div>
+    <button id="submit-form">提交</button>
+    <div class="result" id="form-result"></div>
+  </section>
+
+  <section>
+    <h2>标签页</h2>
+    <div class="tabs">
+      <button class="tab active" data-tab="tab-a">面板 A</button>
+      <button class="tab" data-tab="tab-b">面板 B</button>
+      <button class="tab" data-tab="tab-c">面板 C</button>
+    </div>
+    <div class="tab-content active" id="tab-a">这是面板 A 的内容，包含一些重要信息。</div>
+    <div class="tab-content" id="tab-b">面板 B 显示了不同的数据视图。</div>
+    <div class="tab-content" id="tab-c">面板 C 包含高级设置选项。</div>
+  </section>
+
+  <section>
+    <h2>颜色选择</h2>
+    <div class="color-picker">
+      <input type="color" id="color-input" value="#3b82f6" />
+      <div class="color-box" id="color-box" style="background: #3b82f6;"></div>
+      <span id="color-value">#3b82f6</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>秒表</h2>
+    <div class="timer" id="timer">00:00.000</div>
+    <div class="timer-controls">
+      <button id="timer-start">开始</button>
+      <button id="timer-stop">停止</button>
+      <button id="timer-reset">重置</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>搜索过滤</h2>
+    <input id="search-input" placeholder="搜索列表项..." />
+    <ul class="todo-list" id="filter-list">
+      <li data-text="苹果">苹果</li>
+      <li data-text="香蕉">香蕉</li>
+      <li data-text="橙子">橙子</li>
+      <li data-text="葡萄">葡萄</li>
+      <li data-text="西瓜">西瓜</li>
+    </ul>
+  </section>
+
+  <script type="module">
+    // 计数器
+    let count = 0;
+    const countEl = document.getElementById('count');
+    document.getElementById('inc').addEventListener('click', () => { count++; countEl.textContent = count; });
+    document.getElementById('dec').addEventListener('click', () => { count--; countEl.textContent = count; });
+    document.getElementById('reset-count').addEventListener('click', () => { count = 0; countEl.textContent = 0; });
+
+    // Todo
+    const todoInput = document.getElementById('todo-input');
+    const todoList = document.getElementById('todo-list');
+    document.getElementById('add-todo').addEventListener('click', () => {
+      const text = todoInput.value.trim();
+      if (!text) return;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${text}</span><button class="del-todo">删除</button>`;
+      todoList.appendChild(li);
+      todoInput.value = '';
+    });
+    todoList.addEventListener('click', (e) => {
+      if (e.target.classList.contains('del-todo')) {
+        e.target.closest('li').remove();
+      }
+    });
+
+    // 表单
+    document.getElementById('submit-form').addEventListener('click', () => {
+      const name = document.getElementById('name-input').value;
+      const role = document.getElementById('role-select').value;
+      const note = document.getElementById('note-textarea').value;
+      const agree = document.getElementById('agree-check').checked;
+      if (!name) { document.getElementById('form-result').textContent = '请输入姓名'; return; }
+      if (!agree) { document.getElementById('form-result').textContent = '请同意条款'; return; }
+      document.getElementById('form-result').textContent = `提交成功: ${name} (${role}), 备注: ${note}`;
+    });
+
+    // 标签页
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab).classList.add('active');
+      });
+    });
+
+    // 颜色
+    document.getElementById('color-input').addEventListener('input', (e) => {
+      const color = e.target.value;
+      document.getElementById('color-box').style.background = color;
+      document.getElementById('color-value').textContent = color;
+    });
+
+    // 秒表
+    let timerInterval = null;
+    let timerStart = 0;
+    const timerEl = document.getElementById('timer');
+    function updateTimer() {
+      const elapsed = Date.now() - timerStart;
+      const mins = String(Math.floor(elapsed / 60000)).padStart(2, '0');
+      const secs = String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0');
+      const ms = String(elapsed % 1000).padStart(3, '0');
+      timerEl.textContent = `${mins}:${secs}.${ms}`;
+    }
+    document.getElementById('timer-start').addEventListener('click', () => {
+      if (timerInterval) return;
+      timerStart = Date.now() - (parseInt(timerEl.textContent.split('.')[0]) * 60000 + parseInt(timerEl.textContent.split(':')[1]) * 1000 + parseInt(timerEl.textContent.split('.')[1] || 0));
+      timerStart = Date.now();
+      timerInterval = setInterval(updateTimer, 10);
+    });
+    document.getElementById('timer-stop').addEventListener('click', () => { clearInterval(timerInterval); timerInterval = null; });
+    document.getElementById('timer-reset').addEventListener('click', () => { clearInterval(timerInterval); timerInterval = null; timerEl.textContent = '00:00.000'; });
+
+    // 搜索过滤
+    document.getElementById('search-input').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('#filter-list li').forEach(li => {
+        li.style.display = li.dataset.text.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  </script>
+</body>
+</html>

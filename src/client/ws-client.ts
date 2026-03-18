@@ -1,0 +1,285 @@
+/**
+ * 客户端通信代码（字符串形式，用于注入到浏览器）
+ *
+ * 策略：纯 HTTP 轮询
+ * import.meta.hot 在 transformIndexHtml 注入的脚本中不可用，
+ * 因此 WS 通道在服务端侧保留但客户端不使用
+ */
+
+export const wsClientCode = `
+(function() {
+  /** HMR 代际计数器：旧实例的 check 函数通过比对代际自动停止 */
+  window.__pilot_gen = (window.__pilot_gen || 0) + 1;
+  var myGen = window.__pilot_gen;
+
+  /** 清理旧实例的定时器和监听器 */
+  if (window.__pilot_ws_checkInterval) clearInterval(window.__pilot_ws_checkInterval);
+  if (window.__pilot_ws_visHandler) document.removeEventListener('visibilitychange', window.__pilot_ws_visHandler);
+
+  var execTimeout = __EXEC_TIMEOUT__;
+  var maxResultSize = __MAX_RESULT_SIZE__;
+
+  function serializeResult(val) {
+    var str;
+    if (val === undefined) str = 'undefined';
+    else if (val === null) str = 'null';
+    else if (typeof val === 'function') str = '[Function: ' + (val.name || 'anonymous') + ']';
+    else if (typeof val === 'string') str = val;
+    else { try { str = JSON.stringify(val, null, 2); } catch(e) { str = String(val); } }
+    if (str.length > maxResultSize) {
+      str = str.slice(0, maxResultSize) + '\\n... [truncated, ' + str.length + ' chars total]';
+    }
+    return str;
+  }
+
+  function makeResult(code, result, success, error, logsSinceExec) {
+    return {
+      code: code,
+      result: success ? serializeResult(result) : undefined,
+      success: success,
+      error: error || undefined,
+      logs: logsSinceExec && logsSinceExec.length > 0 ? logsSinceExec : undefined
+    };
+  }
+
+  /** 已知的噪音日志关键词，匹配时不纳入 exec 日志以节省 token */
+  var LOG_NOISE = ['[Vue warn]', '[vite]', '[COSE]', '[Pilot] Running'];
+
+  /** 截取 exec 期间新增的日志条目（紧凑格式：[TYPE] message） */
+  function getLogsSince(idx) {
+    if (!window.__pilot_logs) return [];
+    var newLogs = window.__pilot_logs.slice(idx);
+    return newLogs
+      .filter(function(l) {
+        /** 过滤框架/工具噪音日志 */
+        for (var ni = 0; ni < LOG_NOISE.length; ni++) {
+          if (l.message.indexOf(LOG_NOISE[ni]) !== -1) return false;
+        }
+        return true;
+      })
+      .map(function(l) {
+        var msg = l.message;
+        /** warn/info 截断到 150 字符（去掉 Vue 组件堆栈等冗余信息），error 保留完整信息 */
+        if (l.type !== 'error' && msg.length > 150) {
+          var cutIdx = msg.indexOf('\\n');
+          msg = cutIdx > 0 && cutIdx < 150 ? msg.slice(0, cutIdx) : msg.slice(0, 150) + '...';
+        }
+        return '[' + l.type + '] ' + msg;
+      });
+  }
+
+  function execCode(code) {
+    /** 检测是否需要 async 执行（显式 await 或调用返回 Promise 的辅助函数） */
+    var hasAwait = /\\bawait\\b/.test(code) || code.indexOf('__pilot_waitFor(') !== -1 || code.indexOf('__pilot_wait(') !== -1
+      || code.indexOf('__pilot_typeByPlaceholder(') !== -1 || code.indexOf('__pilot_type(') !== -1
+      || code.indexOf('__pilot_checkMultipleByText(') !== -1 || code.indexOf('__pilot_waitEnabled(') !== -1;
+    /** 记录 exec 开始时的日志位置，用于截取 exec 期间产生的新日志 */
+    var logStartIdx = window.__pilot_logs ? window.__pilot_logs.length : 0;
+
+    if (hasAwait) {
+      /** async exec：使用 AsyncFunction 构造器支持 await 语法
+       *  自动在最后一个表达式前添加 return，使 async exec 与 sync eval 行为一致
+       *  用法: await __pilot_wait(100); __pilot_clickByText("提交")
+       *  用法: await __pilot_wait(50); JSON.stringify({...})
+       */
+      var lines = code.split('\\n');
+      var lastIdx = -1;
+      for (var li = lines.length - 1; li >= 0; li--) {
+        var trimmed = lines[li].trim();
+        if (trimmed && trimmed !== '}' && !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*')) {
+          lastIdx = li;
+          break;
+        }
+      }
+      if (lastIdx >= 0) {
+        var lastLine = lines[lastIdx].trim();
+        if (!/^return\\b/.test(lastLine) && !/^}/.test(lastLine)) {
+          /** 单行含分号时，提取最后一个 ; 后的表达式加 return（避免 return await 导致后续表达式不可达） */
+          var semiIdx = lastLine.lastIndexOf(';');
+          if (semiIdx !== -1 && semiIdx < lastLine.length - 1) {
+            var prefix = lastLine.slice(0, semiIdx + 1);
+            var suffix = lastLine.slice(semiIdx + 1).trim();
+            if (suffix && !/^return\\b/.test(suffix)) {
+              lines[lastIdx] = prefix + ' return ' + suffix;
+            }
+          } else {
+            lines[lastIdx] = 'return ' + lastLine;
+          }
+          code = lines.join('\\n');
+        }
+      }
+      var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+      return new Promise(function(resolve) {
+        var timeoutId = setTimeout(function() {
+          resolve(makeResult(code, undefined, false, 'Execution timeout after ' + execTimeout + 'ms'));
+        }, execTimeout);
+
+        try {
+          var fn = new AsyncFunction(code);
+          fn().then(function(result) {
+            clearTimeout(timeoutId);
+            resolve(makeResult(code, result, true, undefined, getLogsSince(logStartIdx)));
+          }).catch(function(e) {
+            clearTimeout(timeoutId);
+            resolve(makeResult(code, undefined, false, e.message || String(e), getLogsSince(logStartIdx)));
+          });
+        } catch(e) {
+          clearTimeout(timeoutId);
+          resolve(makeResult(code, undefined, false, e.message || String(e)));
+        }
+      });
+    }
+
+    var result;
+    var success = true;
+    var errorMsg = '';
+
+    var timeoutId = setTimeout(function() {
+      throw new Error('Execution timeout after ' + execTimeout + 'ms');
+    }, execTimeout);
+
+    try {
+      /** 支持 return 语句：检测顶层 return 并用 IIFE 包裹 */
+      var hasTopReturn = false;
+      var depth = 0;
+      for (var ci = 0; ci < code.length; ci++) {
+        var ch = code[ci];
+        if (ch === '(' || ch === '{' || ch === '[') depth++;
+        else if (ch === ')' || ch === '}' || ch === ']') depth--;
+        else if (depth === 0 && code.slice(ci, ci + 6) === 'return' && (ci + 6 >= code.length || /[^a-zA-Z0-9_$]/.test(code[ci + 6])) && (ci === 0 || /[^a-zA-Z0-9_$]/.test(code[ci - 1]))) {
+          hasTopReturn = true;
+          break;
+        }
+      }
+      if (hasTopReturn) {
+        result = (0, eval)('(function() { ' + code + ' })()');
+      } else {
+        result = (0, eval)(code);
+      }
+    } catch(e) {
+      success = false;
+      errorMsg = e.message || String(e);
+      result = undefined;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
+  }
+
+  /** 通过 HTTP POST 发送执行结果 */
+  function postResult(result) {
+    fetch('/__pilot/result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
+      body: JSON.stringify(result)
+    }).catch(function() {});
+  }
+
+  /** 发送执行结果并通知完成 */
+  function sendResult(result) {
+    postResult(result);
+    fetch('/__pilot/done', { method: 'POST', headers: pilotHeaders() }).catch(function() {});
+  }
+
+  /** 启动 HTTP 轮询 */
+  /** 公共请求头（包含版本和实例 ID） */
+  function pilotHeaders() {
+    return {
+      'X-Pilot-Version': String(__PILOT_VERSION__),
+      'X-Pilot-Instance': __pilot_instanceId
+    };
+  }
+
+  function startPolling() {
+    /** 执行代码并发送结果的通用处理 */
+    function handleCode(code) {
+      var result = execCode(code);
+      /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
+       *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
+      function sendWithSnapshot(result) {
+        if (window.__pilot_snapshot && !document.hidden) {
+          requestAnimationFrame(function() {
+            setTimeout(function() {
+              if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+              sendResult(result);
+            }, 0);
+          });
+        } else if (window.__pilot_snapshot) {
+          /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
+          setTimeout(function() {
+            if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+            sendResult(result);
+          }, 50);
+        } else {
+          sendResult(result);
+        }
+      }
+      /** async exec 返回 Promise，需要等待完成后再采集 snapshot */
+      if (result && typeof result.then === 'function') {
+        result.then(function(r) { sendWithSnapshot(r); });
+      } else {
+        sendWithSnapshot(result);
+      }
+      if (window.__pilot_postSnapshot) setTimeout(window.__pilot_postSnapshot, 500);
+    }
+
+    /** 短轮询（1s）：前台 tab 即时响应 */
+    function check() {
+      /** HMR 代际检查：旧实例自动停止轮询 */
+      if (myGen !== window.__pilot_gen) return;
+
+      fetch('/__pilot/check?t=' + Date.now(), {
+        headers: pilotHeaders()
+      })
+        .then(function(r) {
+          /** 版本不匹配时服务端返回 X-Pilot-Reload 头，自动刷新页面 */
+          if (r.headers.get('x-pilot-reload') === '1') { location.reload(); return; }
+          if (r.status === 200) return r.text();
+          return null;
+        })
+        .then(function(code) {
+          if (code) handleCode(code);
+        })
+        .catch(function() {});
+    }
+
+    /** 长轮询：后台 tab 保活，服务端 hold 最多 25s 直到有代码 */
+    function longPoll() {
+      if (myGen !== window.__pilot_gen) return;
+
+      fetch('/__pilot/check?wait=1&t=' + Date.now(), {
+        headers: pilotHeaders()
+      })
+        .then(function(r) {
+          /** 版本不匹配时服务端返回 X-Pilot-Reload 头，自动刷新页面 */
+          if (r.headers.get('x-pilot-reload') === '1') { location.reload(); return; }
+          if (r.status === 200) return r.text();
+          return null;
+        })
+        .then(function(code) {
+          if (code) handleCode(code);
+          /** 无论是否有代码，立即发起新的长轮询 */
+          if (myGen === window.__pilot_gen) longPoll();
+        })
+        .catch(function() {
+          /** 网络错误时 5s 后重试 */
+          if (myGen === window.__pilot_gen) setTimeout(longPoll, 5000);
+        });
+    }
+
+    check();
+    longPoll();
+    window.__pilot_ws_checkInterval = setInterval(check, 1000);
+
+    /** 页面重新可见时立即检查（绕过后台 tab 节流） */
+    window.__pilot_ws_visHandler = function() {
+      if (!document.hidden) check();
+    };
+    document.addEventListener('visibilitychange', window.__pilot_ws_visHandler);
+  }
+
+  console.log('[Pilot] Running with HTTP polling (gen=' + myGen + ')');
+  startPolling();
+})();
+`
