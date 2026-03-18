@@ -300,9 +300,40 @@ async function main() {
   page [cached]              读取页面快照（默认实时采集，cached=读缓存）
   logs                     最近一次 exec 的控制台日志
   status                   文件系统状态诊断
+  help                     显示此帮助信息
 
 环境变量: PILOT_INSTANCE
-目录探测: cwd`)
+目录探测: cwd
+
+--- 浏览器端辅助函数 (在 run 中执行) ---
+
+文本匹配（推荐）:
+  __pilot_clickByText(text, nth?)      按文本点击元素
+  __pilot_typeByPlaceholder(ph, value) 在输入框输入（触发 input 事件）
+  __pilot_setValueByPlaceholder(ph, value, nth?) 设置输入框值
+  __pilot_selectValueByText(text, nth?)  选择下拉框选项
+  __pilot_checkByText(text, nth?)      勾选复选框
+  __pilot_findByText(text)             查找元素 → [{idx, tag, text}]
+  __pilot_waitFor(text, timeout?, disappear?)  等待文本出现/消失
+  __pilot_waitEnabled(text, timeout?)  等待禁用元素变为可用
+
+按索引（compact 中的 #N）:
+  __pilot_click(i)        点击元素
+  __pilot_setValue(i, v)  设置值
+  __pilot_type(i, v)      输入值
+  __pilot_dblclick(i)     双击元素
+  __pilot_hover(i)        悬停元素
+
+其他:
+  __pilot_wait(ms)                      等待毫秒
+  __pilot_snapshot()                    获取完整 JSON 快照
+  __pilot_scrollIntoView(i)             滚动到元素
+  __pilot_getRect(i)                    获取元素位置
+  __pilot_checkMultipleByText([t1,t2])  勾选多个复选框
+  __pilot_uncheckByText(text, nth?)     取消勾选
+  __pilot_keydownByText(text, key)      在元素上触发按键
+
+compact snapshot 格式: tag#idx[val=V][check=N][type=T][ph=P][disabled] text`)
       break
   }
 }
