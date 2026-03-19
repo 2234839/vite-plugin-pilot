@@ -32,7 +32,7 @@ npm install -D vite-plugin-pilot
 Send the following to your AI agent (paste into Claude Code `CLAUDE.md` or Cursor `.cursorrules`):
 
 ```
-Read https://raw.githubusercontent.com/Asterisk-X/vite-plugin-pilot/master/SKILL.md,
+Read https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SKILL.md,
 follow its instructions to install vite-plugin-pilot and configure yourself, then start testing browser pages.
 ```
 

@@ -27,7 +27,7 @@ npm install -D vite-plugin-pilot
 把以下内容发送给你的 AI Agent（粘贴到 Claude Code 的 `CLAUDE.md` 或 Cursor 的 `.cursorrules`）：
 
 ```
-请阅读 https://raw.githubusercontent.com/Asterisk-X/vite-plugin-pilot/master/SKILL.md ，
+请阅读 https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SKILL.md ，
 按照其中的指示安装 vite-plugin-pilot 并配置自己，然后开始测试浏览器页面。
 ```
 
