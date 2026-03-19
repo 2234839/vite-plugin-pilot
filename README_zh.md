@@ -24,30 +24,12 @@ npm install -D vite-plugin-pilot
 
 ## 快速开始
 
-### 1. 在 Vite 配置中添加插件
+把以下内容发送给你的 AI Agent（粘贴到 Claude Code 的 `CLAUDE.md` 或 Cursor 的 `.cursorrules`）：
 
-```ts
-// vite.config.ts
-import { pilot } from 'vite-plugin-pilot'
-
-export default defineConfig({
-  plugins: [pilot()],
-})
 ```
-
-### 2. 启动 dev server 并打开浏览器
-
-```bash
-pnpm dev
-# 在浏览器中打开 http://localhost:5173
+请阅读 https://raw.githubusercontent.com/Asterisk-X/vite-plugin-pilot/master/SKILL.md ，
+按照其中的指示安装 vite-plugin-pilot 并配置自己，然后开始测试浏览器页面。
 ```
-
-### 3. 配置 AI Agent
-
-复制 [SKILL.md](./SKILL.md) 的内容发送给你的 AI Agent，Agent 会自动检查插件是否已安装、配置自身并开始测试你的浏览器页面。
-
-**Claude Code**：粘贴到项目 `CLAUDE.md` 或直接在聊天中发送。
-**Cursor**：粘贴到 `.cursorrules` 或直接在聊天中发送。
 
 ## 工作原理
 

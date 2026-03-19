@@ -29,30 +29,12 @@ npm install -D vite-plugin-pilot
 
 ## Quick Start
 
-### 1. Add plugin to your Vite config
+Send the following to your AI agent (paste into Claude Code `CLAUDE.md` or Cursor `.cursorrules`):
 
-```ts
-// vite.config.ts
-import { pilot } from 'vite-plugin-pilot'
-
-export default defineConfig({
-  plugins: [pilot()],
-})
 ```
-
-### 2. Start dev server and open browser
-
-```bash
-pnpm dev
-# Open http://localhost:5173 in your browser
+Read https://raw.githubusercontent.com/Asterisk-X/vite-plugin-pilot/master/SKILL.md,
+follow its instructions to install vite-plugin-pilot and configure yourself, then start testing browser pages.
 ```
-
-### 3. Configure your AI agent
-
-Copy [SKILL.md](./SKILL.md) content and send it to your AI agent. The agent will check if the plugin is installed, configure itself, and start testing your browser pages.
-
-**Claude Code**: paste into project `CLAUDE.md` or directly send in chat.
-**Cursor**: paste into `.cursorrules` or send in chat.
 
 ## How It Works
 
