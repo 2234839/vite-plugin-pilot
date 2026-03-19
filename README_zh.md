@@ -44,40 +44,10 @@ pnpm dev
 
 ### 3. 配置 AI Agent
 
-将以下指令复制到 AI Agent 的配置文件中：
+复制 [SKILL.md](./SKILL.md) 的内容发送给你的 AI Agent，Agent 会自动检查插件是否已安装、配置自身并开始测试你的浏览器页面。
 
-**Claude Code** → 粘贴到项目 `CLAUDE.md`：
-
-```markdown
-<!-- vite-plugin-pilot:start -->
-# vite-plugin-pilot
-
-辅助 AI agent 测试浏览器页面。通过文件 I/O 在浏览器执行 JS。`pnpm dev` 启动，浏览器打开页面即可使用。
-
-## 工作流
-
-```bash
-npx pilot page                    # 看页面（compact 格式）
-npx pilot run '代码' page         # 操作+看结果（一步完成）
-npx pilot run '代码' logs         # 操作+看日志
-npx pilot logs                    # 看最近日志
-npx pilot status                  # 查看连接的 tab 列表
-npx pilot help                    # 查看辅助函数列表
-```
-
-**使用模式**：`page` 看 compact → 读取 `#idx` 或用文本匹配 → `run '操作代码' page` → 验证结果。优先用 `run 'code' page` 一步完成（避免两次 ~5s 轮询延迟）。
-
-**关键注意**：
-- **同一 exec 完成相关操作**（填写+提交），跨 exec Vue/React 状态可能丢失
-- 多步操作间 `await __pilot_wait(0)` 让 Vue scheduler 处理响应式更新
-- **始终用 `typeByPlaceholder`**：Vue/React v-model 需要 input 事件，`type` 触发 input 事件，`setValue` 只改 DOM
-- `page cached` 读缓存（0.03s），不需要最新状态时用
-<!-- vite-plugin-pilot:end -->
-```
-
-**Cursor / 其他 Agent** → 粘贴到 `.cursorrules` 或项目规则中，内容同上。
-
-完成！Agent 现在可以自行帮你开发并测试验证功能是否正确了。
+**Claude Code**：粘贴到项目 `CLAUDE.md` 或直接在聊天中发送。
+**Cursor**：粘贴到 `.cursorrules` 或直接在聊天中发送。
 
 ## 工作原理
 
