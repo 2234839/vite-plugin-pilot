@@ -7,10 +7,14 @@ description: 通过 vite-plugin-pilot 在浏览器中测试页面。当需要查
 
 通过文件 I/O 在浏览器执行 JS，用于查看页面状态、交互和验证功能。
 
-## 前置检查
+## 首次配置（仅初次安装时执行）
 
 1. 确认 vite-plugin-pilot 已安装：检查 package.json 是否包含 `vite-plugin-pilot`，如果没有则执行 `pnpm add -D vite-plugin-pilot`，并确认 vite.config.ts 的 plugins 数组中包含 `pilot()`
-2. 确认 dev server 已启动（检查是否有进程监听 vite 端口）
+2. 确认 `.pilot` 已添加到 `.gitignore`（运行时数据目录，不应提交）
+
+## 每次使用前检查
+
+- 确认 dev server 已启动（检查是否有进程监听 vite 端口）
 
 ## 工作流
 
