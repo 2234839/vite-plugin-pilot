@@ -28,21 +28,18 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
   }
 
   let injectScript = ''
-  /** 是否为开发环境，生产构建时不注入任何内容 */
-  let isDev = false
 
   return {
     name: 'vite-plugin-pilot',
+    /** 仅在开发环境激活，生产构建不参与 */
+    apply: 'serve',
 
-    configResolved(config) {
-      isDev = config.command === 'serve'
-      if (!isDev) return
+    configResolved() {
       resolvedOptions = resolveOptions()
       injectScript = buildInjectScript(resolvedOptions)
     },
 
     configureServer(server) {
-      if (!isDev) return
       if (!resolvedOptions) {
         resolvedOptions = resolveOptions()
       }
@@ -70,14 +67,13 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler(html) {
-        if (!isDev) return
         return html.replace('</body>', injectScript + '</body>')
       },
     },
 
     /** 使用 AST 处理 .vue 文件，正则处理 .html 文件 */
     async transform(code, id) {
-      if (!isDev || !resolvedOptions) return null
+      if (!resolvedOptions) return null
       if (!id.endsWith('.vue') && !id.endsWith('.html')) return null
 
       const { transform } = createSourceLocator(cwd, resolvedOptions)
