@@ -33,6 +33,8 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
     name: 'vite-plugin-pilot',
     /** 仅在开发环境激活，生产构建不参与 */
     apply: 'serve',
+    /** 在 @vitejs/plugin-vue 之前执行 transform，确保拿到原始 SFC 源码 */
+    enforce: 'pre',
 
     configResolved() {
       resolvedOptions = resolveOptions()
