@@ -14,6 +14,20 @@ English | **[简体中文](./README_zh.md)**
 - **自动刷新** — Dev server 重启后浏览器自动刷新
 - **Vue/React 兼容** — `typeByPlaceholder` 触发 input 事件，兼容 v-model
 
+## 为什么不直接用 Chrome DevTools MCP？
+
+| | vite-plugin-pilot | Chrome DevTools MCP |
+|---|---|---|
+| **连接方式** | Dev server 注入（HTTP 轮询） | Chrome DevTools Protocol (CDP) |
+| **需要 CDP 端口** | 不需要 | 需要（`--remote-debugging-port`） |
+| **WPS 加载项** | 支持 | 不支持（无法访问 CDP） |
+| **Electron / 嵌入式浏览器** | 支持 | 不确定（需开启 CDP） |
+| **远程调试** | 支持（浏览器可在任意设备） | 受限（需同一网络 + 暴露 CDP） |
+| **框架感知** | Vue/React v-model、scheduler | 仅操作 DOM |
+| **外部依赖** | 纯文件 I/O，零依赖 | 需要 Puppeteer / CDP 客户端 |
+
+vite-plugin-pilot 在任何能加载 Vite dev server 的浏览器中工作 — 不需要特殊的浏览器启动参数，不需要网络穿透，不需要 CDP 访问权限。打开页面就能用。
+
 ## 安装
 
 ```bash

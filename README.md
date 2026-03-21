@@ -19,6 +19,20 @@ A Vite plugin that lets AI agents (Claude Code, Cursor, etc.) **see, interact wi
 - **Auto Reload** — Browser auto-refreshes when dev server restarts
 - **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
 
+## Why Not Chrome DevTools MCP?
+
+| | vite-plugin-pilot | Chrome DevTools MCP |
+|---|---|---|
+| **Connects via** | Dev server injection (HTTP polling) | Chrome DevTools Protocol (CDP) |
+| **Requires CDP port** | No | Yes (`--remote-debugging-port`) |
+| **WPS Add-ins** | Yes | No (no CDP access) |
+| **Electron / embedded browsers** | Yes | Maybe (needs CDP enabled) |
+| **Remote debugging** | Yes (browser on any device) | Limited (same network, CDP exposed) |
+| **Framework awareness** | Vue/React v-model, scheduler | DOM-only |
+| **Zero external deps** | Pure file I/O | Needs Puppeteer/CDP client |
+
+vite-plugin-pilot works anywhere a browser loads your Vite dev server — no special browser flags, no network tunneling, no CDP access needed. Just open the page and go.
+
 ## Installation
 
 ```bash
