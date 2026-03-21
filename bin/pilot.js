@@ -4,8 +4,8 @@
  * 纯文件 I/O，不依赖 HTTP 接口
  *
  * 用法:
- *   npx pilot run '1+1'            执行 JS 并获取结果
- *   npx pilot run 'code' page logs 执行并附带页面快照+日志
+ *   npx pilot run '1+1'            执行 JS 并获取结果+日志+页面快照
+ *   npx pilot run 'code' page logs 执行并附带页面快照+日志（同默认行为）
  *   npx pilot page                 读取页面快照（默认实时采集）
  *   npx pilot page cached          读取缓存的页面快照
  *   npx pilot logs                 读取最近 exec 的控制台日志
@@ -133,12 +133,14 @@ function listInstances(pilotDir) {
 function parseArgs(args) {
   const command = args[0] || 'help'
   const rest = args.slice(1)
-  const flags = { page: false, logs: false, fresh: false, cached: false }
+  const flags = { page: false, logs: false, fresh: false, cached: false, nopage: false, nologs: false }
   const positional = []
 
   for (const arg of rest) {
     if (arg === 'page') flags.page = true
     else if (arg === 'logs') flags.logs = true
+    else if (arg === 'nopage') flags.nopage = true
+    else if (arg === 'nologs') flags.nologs = true
     else if (arg === 'fresh') flags.fresh = true
     else if (arg === 'cached') flags.cached = true
     else positional.push(arg)
@@ -172,7 +174,7 @@ async function main() {
     case 'run': {
       const code = positional[0]
       if (!code) {
-        console.error('用法: pilot run <code> [page] [logs]')
+        console.error('用法: pilot run <code> [nopage] [nologs]')
         process.exit(1)
       }
       if (!pilotDir) {
@@ -192,16 +194,21 @@ async function main() {
       const instanceDir = getInstanceDir(pilotDir, instanceId)
       let output = readFileSafe(join(instanceDir, PILOT_FILES.resultTxt)) || ''
 
-      if (flags.page) {
+      /** 默认附带日志和页面快照，agent 无需手动指定 page/logs。
+       *  传 nopage/nologs 可关闭 */
+      const showLogs = !flags.nologs
+      const showPage = !flags.nopage
+
+      if (showLogs) {
+        const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
+        if (logs) output += '\n---\n' + logs
+      }
+      if (showPage) {
         /** 优先从 exec-result.json 读取 snapshotText（与 exec-done 同步写入），
          *  fallback 到 compact-snapshot.txt（可能在 exec-done 后才更新） */
         const execResult = readJsonSafe(join(instanceDir, 'exec-result.json'))
         const snapshot = execResult?.snapshotText || readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
         if (snapshot) output += '\n---\n' + snapshot
-      }
-      if (flags.logs) {
-        const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
-        if (logs) output += '\n---\n' + logs
       }
 
       console.log(output)
@@ -296,7 +303,7 @@ async function main() {
 用法: pilot <command> [args]
 
 命令:
-  run <code> [page] [logs]  执行 JS，可选附带页面快照和日志
+  run <code> [nopage] [nologs]  执行 JS，默认附带日志+页面快照
   page [cached]              读取页面快照（默认实时采集，cached=读缓存）
   logs                     最近一次 exec 的控制台日志
   status                   文件系统状态诊断
