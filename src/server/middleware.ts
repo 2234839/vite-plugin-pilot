@@ -22,7 +22,7 @@ interface WaiterOptions {
  * 创建 Pilot 中间件路由
  * 处理所有 /__pilot/* 端点请求
  * 通过 SSE + 文件通道实现浏览器通信（CLI 写 pending.js → fs.watch → SSE 推送 → exec → POST /result）
- * 支持多实例：每个浏览器 tab 通过 URL path 自动隔离
+ * 支持多实例：每个浏览器 tab 通过随机 instance ID 自动隔离
  */
 export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: string) {
   const bridge = new FileBridge(options)
