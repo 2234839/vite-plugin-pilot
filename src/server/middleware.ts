@@ -208,20 +208,42 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         sseConnections[sseInstance].push(res)
 
         /** 用 fs.watch 监听实例目录变化，CLI 写入 pending.js 时即时推送
-         *  替代 1s setInterval 轮询，实现零延迟 CLI → 浏览器通信 */
+         *  失败时 fallback 到 1s setInterval 轮询（网络文件系统、Docker 挂载等场景） */
         const instanceDir = bridge.getInstanceDir(sseInstance)
+        /** 检查并推送 pending.js 代码的公共逻辑 */
+        const checkAndBroadcast = () => {
+          const fileCode = bridge.readPendingJs(sseInstance)
+          if (!fileCode) return
+          bridge.clearExecResult(sseInstance)
+          bridge.clearExecDone(sseInstance)
+          lastBrowserActivity[sseInstance] = Date.now()
+          broadcastCode(sseInstance, fileCode)
+        }
+
+        let cleanup: (() => void) | undefined
         if (!instanceWatchers[sseInstance]) {
           bridge.ensureInstanceDir(sseInstance)
-          const watcher = fsWatch(instanceDir, (eventType) => {
-            if (eventType !== 'rename' && eventType !== 'change') return
-            const fileCode = bridge.readPendingJs(sseInstance)
-            if (!fileCode) return
-            bridge.clearExecResult(sseInstance)
-            bridge.clearExecDone(sseInstance)
-            lastBrowserActivity[sseInstance] = Date.now()
-            broadcastCode(sseInstance, fileCode)
-          })
-          instanceWatchers[sseInstance] = watcher
+          let watchFailed = false
+          let watcher: FSWatcher | undefined
+          try {
+            watcher = fsWatch(instanceDir, (eventType) => {
+              if (eventType !== 'rename' && eventType !== 'change') return
+              checkAndBroadcast()
+            })
+            /** 捕获 fs.watch 底层错误（如 inotify 限额耗尽、不支持的平台） */
+            watcher.on('error', () => {
+              watchFailed = true
+            })
+            instanceWatchers[sseInstance] = watcher
+          } catch {
+            watchFailed = true
+          }
+
+          if (watchFailed) {
+            /** fs.watch 不可用时 fallback 到 1s 轮询 */
+            const pollTimer = setInterval(checkAndBroadcast, 1000)
+            cleanup = () => clearInterval(pollTimer)
+          }
         }
 
         req.on('close', () => {
@@ -230,8 +252,10 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
             const idx = conns.indexOf(res)
             if (idx !== -1) conns.splice(idx, 1)
           }
-          /** 最后一个 SSE 连接断开时关闭 watcher，避免资源泄漏 */
-          if (conns && conns.length === 0 && instanceWatchers[sseInstance]) {
+          if (cleanup) {
+            cleanup()
+            cleanup = undefined
+          } else if (conns && conns.length === 0 && instanceWatchers[sseInstance]) {
             instanceWatchers[sseInstance].close()
             delete instanceWatchers[sseInstance]
           }
