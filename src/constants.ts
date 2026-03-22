@@ -6,20 +6,16 @@ export const PILOT_PREFIX = '/__pilot'
 
 /** 所有端点路径 */
 export const PILOT_ENDPOINTS = {
-  /** POST - 接收日志 */
-  logs: `${PILOT_PREFIX}/logs`,
   /** POST - 直接执行 JS */
   exec: `${PILOT_PREFIX}/exec`,
-  /** GET - 轮询待执行代码 */
-  check: `${PILOT_PREFIX}/check`,
   /** POST - 回传执行结果 */
   result: `${PILOT_PREFIX}/result`,
   /** POST - 上报元素信息 */
   inspect: `${PILOT_PREFIX}/inspect`,
   /** GET - 获取页面快照 */
   snapshot: `${PILOT_PREFIX}/snapshot`,
-  /** POST - 标记执行完成（浏览器通知 AI） */
-  done: `${PILOT_PREFIX}/done`,
+  /** GET - 获取最近 exec 的控制台日志 */
+  logs: `${PILOT_PREFIX}/logs`,
   /** GET - SSE 推送待执行代码 */
   sse: `${PILOT_PREFIX}/sse`,
 } as const

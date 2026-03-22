@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import { watch as fsWatch, type FSWatcher } from 'fs'
-import type { ResolvedPilotOptions, ExecResult, ElementInfo, SnapshotData } from '../types'
+import type { ResolvedPilotOptions, ExecResult, ElementInfo } from '../types'
 import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
 import { generateElementPrompt } from '../prompt/generator'
@@ -33,9 +33,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     bridge.writeVersion(pilotVersion)
   }
 
-  /** /check 长轮询等待者队列（按实例隔离，保留作为 fallback） */
-  const checkWaiters: Record<string, Array<{ res: ServerResponse; timer: NodeJS.Timeout }>> = {}
-
   /** SSE 连接池（按实例隔离） */
   const sseConnections: Record<string, Array<ServerResponse>> = {}
 
@@ -60,37 +57,15 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     }
   }
 
-  /** 唤醒 /check 长轮询等待者，返回队列中的待执行代码 */
-  function wakeCheckWaiters(instanceId: string): void {
-    const fileCode = bridge.readPendingJs(instanceId)
-    const queue = pendingCodeQueues[instanceId]
-    const code = fileCode ?? queue?.shift()
-    if (!code) return
-    /** 新代码分发时清除旧结果 */
+  /** 通过 SSE 广播代码给浏览器（清除旧结果，更新活跃时间） */
+  function dispatchCode(instanceId: string, code: string): void {
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
-
-    /** 优先通过 SSE 广播给所有连接 */
-    const sseConns = sseConnections[instanceId]
-    if (sseConns && sseConns.length > 0) {
-      broadcastCode(instanceId, code)
-      return
-    }
-
-    /** fallback：唤醒长轮询等待者（FIFO） */
-    const waiters = checkWaiters[instanceId]
-    if (!waiters || waiters.length === 0) return
-    const waiter = waiters.shift()!
-    clearTimeout(waiter.timer)
-    waiter.res.writeHead(200, {
-      'Content-Type': 'text/plain',
-      'Cache-Control': 'no-cache, no-store',
-    })
-    waiter.res.end(code)
+    broadcastCode(instanceId, code)
   }
 
-  /** 每个实例独立的待执行代码队列 */
+  /** HTTP API 代码分发队列（POST /exec、GET /run 推送的代码暂存于此） */
   const pendingCodeQueues: Record<string, string[]> = {}
 
   /** 每个实例最后的浏览器活动时间戳 */
@@ -146,8 +121,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           if (!pendingCodeQueues[instanceId]) pendingCodeQueues[instanceId] = []
           pendingCodeQueues[instanceId].push(code)
 
-          /** 唤醒可能正在长轮询等待的 /check 请求 */
-          wakeCheckWaiters(instanceId)
+          /** 通过 SSE 广播给浏览器 */
+          dispatchCode(instanceId, code)
 
           if (shouldWait) {
             /** 快速失败：从未有浏览器连接时立即返回 503 */
@@ -260,79 +235,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
             delete instanceWatchers[sseInstance]
           }
         })
-        return
-      }
-
-      /** ---------- GET /__pilot/check ---------- */
-      if (endpoint === PILOT_ENDPOINTS.check && req.method === 'GET') {
-        lastBrowserActivity[instanceId] = Date.now()
-
-        /** 注册实例信息（instanceId + URL path → active-instance.json） */
-        const referer = req.headers.referer
-        if (referer) {
-          try {
-            const urlObj = new URL(referer)
-            bridge.writeActiveInstance(instanceId, urlObj.pathname)
-          } catch { /* ignore */ }
-        }
-
-        /** 版本不匹配时返回 reload 代码，客户端执行后自动刷新页面 */
-        const clientVersion = req.headers['x-pilot-version'] as string
-        const needReload = clientVersion && pilotVersion && clientVersion !== pilotVersion
-
-        const fileCode = bridge.readPendingJs(instanceId)
-        const queue = pendingCodeQueues[instanceId]
-        const code = fileCode ?? queue?.shift()
-
-        if (code) {
-          /** 新代码分发时清除旧结果，避免 AI 读到过期数据 */
-          bridge.clearExecResult(instanceId)
-          bridge.clearExecDone(instanceId)
-          res.writeHead(200, {
-            'Content-Type': 'text/plain',
-            'Cache-Control': 'no-cache, no-store',
-          })
-          res.end(code)
-        } else if (needReload) {
-          /** 版本不匹配且无待执行代码：返回 reload 指令，兼容旧客户端（eval 后直接 reload） */
-          res.writeHead(200, {
-            'Content-Type': 'text/plain',
-            'Cache-Control': 'no-cache, no-store',
-          })
-          res.end('location.reload()')
-        } else {
-          /** 长轮询模式：hold 住请求，等待代码入队或超时 */
-          const url = new URL(req.url, 'http://localhost')
-          const longPoll = url.searchParams.get('wait') !== null
-          if (longPoll) {
-            if (!checkWaiters[instanceId]) checkWaiters[instanceId] = []
-            const timer = setTimeout(() => {
-              /** 超时前检查 pending.js 文件（CLI 文件 I/O 模式写入的代码） */
-              const fileCode = bridge.readPendingJs(instanceId)
-              if (fileCode) {
-                const idx = checkWaiters[instanceId].findIndex(w => w.res === res)
-                if (idx !== -1) checkWaiters[instanceId].splice(idx, 1)
-                bridge.clearExecResult(instanceId)
-                bridge.clearExecDone(instanceId)
-                lastBrowserActivity[instanceId] = Date.now()
-                res.writeHead(200, {
-                  'Content-Type': 'text/plain',
-                  'Cache-Control': 'no-cache, no-store',
-                })
-                res.end(fileCode)
-                return
-              }
-              const idx = checkWaiters[instanceId].findIndex(w => w.res === res)
-              if (idx !== -1) checkWaiters[instanceId].splice(idx, 1)
-              res.writeHead(204, { 'Cache-Control': 'no-cache, no-store' })
-              res.end()
-            }, 3_000)
-            checkWaiters[instanceId].push({ res, timer })
-          } else {
-            res.writeHead(204, { 'Cache-Control': 'no-cache, no-store' })
-            res.end()
-          }
-        }
         return
       }
 
@@ -485,22 +387,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         return
       }
 
-      /** ---------- POST /__pilot/snapshot (客户端上报) ---------- */
-      if (endpoint === PILOT_ENDPOINTS.snapshot && req.method === 'POST') {
-        handlePost<SnapshotData>(req, res, (data) => {
-          bridge.writeSnapshot(data, instanceId)
-          /** 仅当 snapshot 包含可见元素时才更新 compact-snapshot.txt，
-           *  避免页面 reload 时空 snapshot 覆盖有效内容 */
-          const raw = data.visibleElements
-          if (Array.isArray(raw) && raw.length > 0) {
-            const { fullText } = getCompactText(data as unknown as Record<string, unknown>)
-            bridge.writeCompactSnapshot(fullText, instanceId)
-          }
-          return { success: true }
-        })
-        return
-      }
-
       /** ---------- GET /__pilot/snapshot (Agent 读取) ---------- */
       if (endpoint === PILOT_ENDPOINTS.snapshot && req.method === 'GET') {
         /**
@@ -569,15 +455,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         return
       }
 
-      /** ---------- POST /__pilot/done (浏览器通知执行完成) ---------- */
-      if (endpoint === PILOT_ENDPOINTS.done && req.method === 'POST') {
-        lastBrowserActivity[instanceId] = Date.now()
-        bridge.writeExecDone(instanceId)
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: true }))
-        return
-      }
-
       /** ---------- GET /__pilot/run (一站式 exec + 等待 + 返回纯文本结果)
        *  agent 一次 curl 即可执行代码并获取结果，无需文件轮询
        *  ?code=xxx — 要执行的 JS 代码（URL 编码）
@@ -610,8 +487,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         if (!pendingCodeQueues[runInstance]) pendingCodeQueues[runInstance] = []
         pendingCodeQueues[runInstance].push(code)
 
-        /** 唤醒可能正在长轮询等待的 /check 请求 */
-        wakeCheckWaiters(runInstance)
+        /** 通过 SSE 广播给浏览器 */
+        dispatchCode(runInstance, code)
 
         /** 同步等待结果，超时后返回 TIMEOUT */
         waitForRunResult(runInstance, res, withPage, withLogs)

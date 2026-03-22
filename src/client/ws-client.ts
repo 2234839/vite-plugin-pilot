@@ -220,7 +220,6 @@ export const wsClientCode = `
     } else {
       sendWithSnapshot(result);
     }
-    if (window.__pilot_postSnapshot) setTimeout(window.__pilot_postSnapshot, 500);
   }
 
   /** 通过 SSE 接收代码推送，替代 HTTP 轮询 */

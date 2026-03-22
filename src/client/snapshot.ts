@@ -5,8 +5,7 @@
  * 1. 采集页面 URL、标题、路由、查询参数
  * 2. 遍历可见元素（最多 80 个），仅叶子节点含 text，避免冗余
  * 3. 遍历 Vue 组件树（最多 5 层）
- * 4. 每 5s 自动上报快照到服务端，保持 .pilot/snapshot.json 始终最新
- * 5. 采集性能指标
+ * 4. 提供 __pilot_snapshot() 供 exec 通道采集页面状态
  */
 
 export const snapshotCode = `
@@ -900,20 +899,5 @@ export const snapshotCode = `
     };
   };
 
-  /** POST 快照到服务端（异步 fetch，不阻塞主线程） */
-  window.__pilot_postSnapshot = function() {
-    var data = window.__pilot_snapshot();
-    fetch('/__pilot/snapshot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
-      body: JSON.stringify(data)
-    }).catch(function() {});
-    return data;
-  };
-
-  /** 页面加载时上报一次初始快照（后续由 exec 通道自动更新 compact-snapshot.txt） */
-  if (window.__pilot_snap_interval) clearInterval(window.__pilot_snap_interval);
-  if (window.__pilot_snap_visHandler) document.removeEventListener('visibilitychange', window.__pilot_snap_visHandler);
-  window.__pilot_postSnapshot();
 })();
 `

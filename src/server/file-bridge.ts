@@ -170,12 +170,6 @@ export class FileBridge {
     return JSON.parse(readFileSync(file, 'utf-8'))
   }
 
-  /** 写入页面快照 */
-  writeSnapshot(data: SnapshotData, instanceId: string) {
-    this.ensureInstanceDir(instanceId)
-    writeFileSync(join(this.getInstanceDir(instanceId), PILOT_FILES.snapshot), JSON.stringify(data, null, 2), 'utf-8')
-  }
-
   /** 写入 compact 格式快照（供 AI 直接 cat 读取） */
   writeCompactSnapshot(text: string, instanceId: string) {
     this.ensureInstanceDir(instanceId)
