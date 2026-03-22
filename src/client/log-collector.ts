@@ -26,7 +26,7 @@ export const logCollectorCode = `
   window.__pilot_logs = logs;
 
   /** 已知噪音日志（vite 警告等），不计入 errorCount 也不纳入 lastErrors */
-  var ERROR_NOISE = ['[vite]', 'failed to connect to websocket'];
+  var ERROR_NOISE = ['[vite]', 'failed to connect to websocket', '[Vue warn]'];
 
   function addLog(type, args) {
     if (type === 'error') {

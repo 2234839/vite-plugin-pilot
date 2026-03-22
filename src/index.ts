@@ -24,6 +24,7 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
       execTimeout: userOptions.execTimeout ?? DEFAULT_OPTIONS.execTimeout,
       maxResultSize: userOptions.maxResultSize ?? DEFAULT_OPTIONS.maxResultSize,
       inspector: userOptions.inspector ?? DEFAULT_OPTIONS.inspector,
+      locale: userOptions.locale ?? DEFAULT_OPTIONS.locale,
       pilotDir: resolve(cwd, PILOT_FILES.dir),
     }
   }

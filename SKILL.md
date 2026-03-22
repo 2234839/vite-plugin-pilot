@@ -50,7 +50,21 @@ npx pilot help                    # 查看辅助函数列表
 - 显示选中元素的标签、组件名、源码位置
 - 输入框中描述你想对元素做什么
 - 点击「复制提示词」生成包含元素完整信息（标签、组件、源码、DOM路径、位置、文本、样式）的提示词
-- 复制后 8 秒倒计时自动关闭，输入时重置倒计时
+- 点击「发送给 Claude」直接推送到当前 Claude Code session（需启动 channel server）
+- 操作后 8 秒倒计时自动关闭，输入时重置倒计时
 - 弹窗存在时选中元素的高亮保持显示
 
 **关闭 Element Inspector**：在 vite.config.ts 中设置 `pilot({ inspector: false })`
+
+## Channel Server（浏览器直连 Claude Code）
+
+通过 Claude Code Channels API，浏览器中 Alt+Click 的提示词可直接推送到当前 Claude Code session。
+
+**启动方式**（在另一个终端）：
+```bash
+npx pilot-channel
+# 然后用以下命令启动 Claude Code：
+claude --dangerously-load-development-channels server:pilot-channel
+```
+
+浏览器端「发送给 Claude」按钮会在 channel server 运行时自动可用，未启动时显示「未连接」。

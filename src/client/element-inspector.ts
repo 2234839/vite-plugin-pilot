@@ -3,9 +3,9 @@
  *
  * 功能：
  * 1. 按住 Alt 键激活选择模式，鼠标移动时高亮目标元素（组件名、源码位置、尺寸）
- * 2. Alt+Click 选中元素，弹出入框+复制按钮面板
- * 3. 用户输入描述后一键复制提示词（含元素标签、组件、源码、DOM路径、位置、文本、样式）
- * 4. 复制后 8 秒倒计时自动关闭，用户输入可重置倒计时
+ * 2. Alt+Click 选中元素，弹出输入框+操作按钮面板
+ * 3. 用户输入描述后可复制提示词或直接发送给 Claude Code（需启动 channel server）
+ * 4. 操作后 8 秒倒计时自动关闭，用户输入可重置倒计时
  */
 
 export const elementInspectorCode = `
@@ -14,6 +14,10 @@ export const elementInspectorCode = `
   var currentTarget = null;
   var overlay = null;
   var tooltip = null;
+  /** 面板打开时保持高亮，忽略 Alt 键松开 */
+  var panelOpen = false;
+  /** pilot-channel server 地址（Claude Code Channels 功能） */
+  var CHANNEL_URL = 'http://127.0.0.1:8789/message';
 
   function createOverlay() {
     overlay = document.createElement('div');
@@ -160,7 +164,8 @@ export const elementInspectorCode = `
   function onAltKeyUp(e) {
     if (!e.altKey && active) {
       active = false;
-      hideHighlight();
+      /** 面板打开时保持高亮 */
+      if (!panelOpen) hideHighlight();
       document.body.style.cursor = '';
     }
   }
@@ -206,18 +211,20 @@ export const elementInspectorCode = `
       : '';
 
     panel.innerHTML =
-      '<div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">选中元素: <span style="color:#60a5fa">' +
+      '<div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">__LOCALE_SELECTED__: <span style="color:#60a5fa">' +
         info.tagName + compInfo + '</span> <span style="color:#475569">' + sourceInfo + '</span></div>' +
-      '<div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">文本: <span style="color:#cbd5e1">' +
-        (info.textContent || '(空)').slice(0, 100) + '</span></div>' +
-      '<textarea id="__pilot-prompt-input" placeholder="描述你想对这个元素做什么（如：把这个按钮改成蓝色、修改这段文字的内容...）" style="width:100%;height:72px;background:rgba(30,41,59,0.8);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:10px;color:#e2e8f0;font-size:13px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box;"></textarea>' +
+      '<div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">__LOCALE_TEXT__: <span style="color:#cbd5e1">' +
+        (info.textContent || '__LOCALE_EMPTY__').slice(0, 100) + '</span></div>' +
+      '<textarea id="__pilot-prompt-input" placeholder="__LOCALE_PLACEHOLDER__" style="width:100%;height:72px;background:rgba(30,41,59,0.8);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:10px;color:#e2e8f0;font-size:13px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box;"></textarea>' +
       '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">' +
         '<span id="__pilot-prompt-timer" style="font-size:12px;color:#64748b;line-height:28px;margin-right:auto;"></span>' +
-        '<button id="__pilot-prompt-copy" style="padding:6px 16px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">复制提示词</button>' +
-        '<button id="__pilot-prompt-close" style="padding:6px 16px;background:rgba(51,65,85,0.8);color:#94a3b8;border:none;border-radius:6px;cursor:pointer;font-size:13px;">关闭</button>' +
+        '<button id="__pilot-prompt-send" style="padding:6px 16px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">__LOCALE_SEND_TO_CLAUDE__</button>' +
+        '<button id="__pilot-prompt-copy" style="padding:6px 16px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">__LOCALE_COPY_PROMPT__</button>' +
+        '<button id="__pilot-prompt-close" style="padding:6px 16px;background:rgba(51,65,85,0.8);color:#94a3b8;border:none;border-radius:6px;cursor:pointer;font-size:13px;">__LOCALE_CLOSE__</button>' +
       '</div>';
 
     document.body.appendChild(panel);
+    panelOpen = true;
 
     /** 聚焦输入框 */
     var textarea = document.getElementById('__pilot-prompt-input');
@@ -234,29 +241,16 @@ export const elementInspectorCode = `
       timerSpan.textContent = '';
       autoCloseTimer = setInterval(function() {
         countdown--;
-        timerSpan.textContent = countdown + 's 后关闭';
+        timerSpan.textContent = countdown + '__LOCALE_CLOSE_IN__';
         if (countdown <= 0) {
-          clearInterval(autoCloseTimer);
-          autoCloseTimer = null;
-          panel.remove();
+          closePanel();
         }
       }, 1000);
     }
 
     /** 复制后启动倒计时 */
     function startAutoClose() {
-      countdown = 8;
-      if (autoCloseTimer) clearInterval(autoCloseTimer);
-      timerSpan.textContent = '';
-      autoCloseTimer = setInterval(function() {
-        countdown--;
-        timerSpan.textContent = countdown + 's 后关闭';
-        if (countdown <= 0) {
-          clearInterval(autoCloseTimer);
-          autoCloseTimer = null;
-          panel.remove();
-        }
-      }, 1000);
+      resetAutoClose();
     }
 
     /** 用户在输入框中输入时重置倒计时 */
@@ -273,27 +267,60 @@ export const elementInspectorCode = `
       var parts = [];
       if (userDesc) parts.push(userDesc);
       parts.push('');
-      parts.push('--- 选中元素信息 ---');
-      parts.push('标签: ' + info.tagName + (info.className ? '.' + info.className.split(/\\s+/).slice(0, 3).join('.') : ''));
-      if (info.componentName) parts.push('组件: ' + info.componentName);
-      if (info.sourceFile) parts.push('源码: ' + info.sourceFile + (info.sourceLine ? ':' + info.sourceLine : ''));
-      parts.push('DOM路径: ' + info.domPath);
-      parts.push('位置: ' + info.rect.top + ', ' + info.rect.left + ' (' + info.rect.width + '×' + info.rect.height + ')');
+      parts.push('__LOCALE_ELEMENT_INFO__');
+      parts.push('__LOCALE_TAG__: ' + info.tagName + (info.className ? '.' + info.className.split(/\\s+/).slice(0, 3).join('.') : ''));
+      if (info.componentName) parts.push('__LOCALE_COMPONENT__: ' + info.componentName);
+      if (info.sourceFile) parts.push('__LOCALE_SOURCE__: ' + info.sourceFile + (info.sourceLine ? ':' + info.sourceLine : ''));
+      parts.push('__LOCALE_DOM_PATH__: ' + info.domPath);
+      parts.push('__LOCALE_POSITION__: ' + info.rect.top + ', ' + info.rect.left + ' (' + info.rect.width + '×' + info.rect.height + ')');
       var text = info.textContent || '';
-      if (text) parts.push('文本: ' + text.slice(0, 200));
-      if (info.computedStyles) parts.push('样式: color=' + info.computedStyles.color + ' font-size=' + info.computedStyles.fontSize);
+      if (text) parts.push('__LOCALE_TEXT_CONTENT__: ' + text.slice(0, 200));
+      if (info.computedStyles) parts.push('__LOCALE_STYLE__: color=' + info.computedStyles.color + ' font-size=' + info.computedStyles.fontSize);
       return parts.join('\\n');
     }
+
+    /** 发送给 Claude 按钮（通过 pilot-channel server 推送到 Claude Code session） */
+    document.getElementById('__pilot-prompt-send').onclick = function() {
+      var text = getPromptText();
+      var btn = document.getElementById('__pilot-prompt-send');
+      var originalText = btn.textContent;
+      btn.textContent = '__LOCALE_SENDING__';
+      btn.style.background = '#6d28d9';
+      var controller = new AbortController();
+      var timer = setTimeout(function() { controller.abort(); }, 3000);
+      fetch(CHANNEL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+        signal: controller.signal,
+      }).then(function(res) {
+        clearTimeout(timer);
+        if (res.ok) {
+          btn.textContent = '__LOCALE_SENT__';
+          btn.style.background = '#22c55e';
+          startAutoClose();
+        } else {
+          btn.textContent = '__LOCALE_SEND_FAILED__';
+          btn.style.background = '#ef4444';
+        }
+        setTimeout(function() { btn.textContent = originalText; btn.style.background = '#7c3aed'; }, 1500);
+      }).catch(function() {
+        /** channel server 未启动时静默提示 */
+        btn.textContent = '__LOCALE_NOT_CONNECTED__';
+        btn.style.background = '#64748b';
+        setTimeout(function() { btn.textContent = originalText; btn.style.background = '#7c3aed'; }, 1500);
+      });
+    };
 
     /** 复制按钮 */
     document.getElementById('__pilot-prompt-copy').onclick = function() {
       var text = getPromptText();
       navigator.clipboard.writeText(text).then(function() {
         var btn = document.getElementById('__pilot-prompt-copy');
-        btn.textContent = '已复制!';
+        btn.textContent = '__LOCALE_COPIED__';
         btn.style.background = '#22c55e';
         startAutoClose();
-        setTimeout(function() { btn.textContent = '复制提示词'; btn.style.background = '#3b82f6'; }, 1500);
+        setTimeout(function() { btn.textContent = '__LOCALE_COPY_PROMPT__'; btn.style.background = '#3b82f6'; }, 1500);
       }).catch(function() {
         /** fallback: 选中 textarea 内容 */
         var fullPrompt = getPromptText();
@@ -305,6 +332,7 @@ export const elementInspectorCode = `
     /** 关闭面板时清理高亮 */
     function closePanel() {
       if (autoCloseTimer) clearInterval(autoCloseTimer);
+      panelOpen = false;
       hideHighlight();
       panel.remove();
     }

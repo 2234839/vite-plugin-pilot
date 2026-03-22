@@ -31,8 +31,6 @@ const PILOT_FILES = {
 function findPilotDir() {
   const candidates = [
     process.cwd(),
-    join(process.cwd(), 'playground', 'vue'),
-    join(process.cwd(), 'playground', 'react'),
   ]
   for (const dir of candidates) {
     if (existsSync(join(dir, PILOT_FILES.dir, 'port.txt'))) {
@@ -247,7 +245,11 @@ async function main() {
       const doneFile = join(getInstanceDir(pilotDir, instanceId), PILOT_FILES.execDone)
       const ok = await waitForFile(doneFile, 30000)
       if (!ok) {
-        console.error('TIMEOUT')
+        /** 超时时输出已有日志，帮助 agent 诊断为什么浏览器未响应 */
+        const instanceDir = getInstanceDir(pilotDir, instanceId)
+        const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
+        if (logs) console.error('TIMEOUT\n---\n' + logs)
+        else console.error('TIMEOUT')
         process.exit(1)
       }
 

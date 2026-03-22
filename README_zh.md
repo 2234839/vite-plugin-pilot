@@ -14,6 +14,7 @@ English | **[简体中文](./README_zh.md)**
 - **自动刷新** — Dev server 重启后浏览器自动刷新
 - **Vue/React 兼容** — `typeByPlaceholder` 触发 input 事件，兼容 v-model
 - **Element Inspector** — Alt+Click 选中元素，生成含完整信息的提示词，供 AI Agent 使用
+- **Channel Server** — 浏览器端提示词可直接推送到 Claude Code session（通过 Channels API）
 
 ## 为什么不直接用 Chrome DevTools MCP？
 
@@ -45,6 +46,20 @@ npm install -D vite-plugin-pilot
 请阅读 https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SKILL.md ，
 按照其中的指示安装 vite-plugin-pilot 并配置自己，然后开始测试浏览器页面。
 ```
+
+## 浏览器直连 Claude Code（Channel Server）
+
+通过 Claude Code Channels API，浏览器中 Alt+Click 的提示词可直接推送到当前 Claude Code session，无需复制粘贴。
+
+```bash
+# 终端 1：启动 channel server
+npx pilot-channel
+
+# 终端 2：启动 Claude Code 并加载 channel
+claude --dangerously-load-development-channels server:pilot-channel
+```
+
+浏览器端 Alt+Click 元素面板中的「发送给 Claude」按钮会自动检测 channel server 是否运行。
 
 ## 工作原理
 

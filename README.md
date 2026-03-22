@@ -19,6 +19,7 @@ A Vite plugin that lets AI agents (Claude Code, Cursor, etc.) **see, interact wi
 - **Auto Reload** — Browser auto-refreshes when dev server restarts
 - **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
 - **Element Inspector** — Alt+Click any element to generate a prompt with full context for AI agents
+- **Channel Server** — Push prompts directly to Claude Code session via Channels API
 
 ## Why Not Chrome DevTools MCP?
 
@@ -50,6 +51,20 @@ Send the following to your AI agent (paste into Claude Code `CLAUDE.md` or Curso
 Read https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SKILL.md,
 follow its instructions to install vite-plugin-pilot and configure yourself, then start testing browser pages.
 ```
+
+## Browser-to-Claude Code (Channel Server)
+
+Push prompts directly from the browser to your running Claude Code session via the Channels API — no copy-paste needed.
+
+```bash
+# Terminal 1: Start channel server
+npx pilot-channel
+
+# Terminal 2: Start Claude Code with channel
+claude --dangerously-load-development-channels server:pilot-channel
+```
+
+The "Send to Claude" button in the Alt+Click panel auto-detects whether the channel server is running.
 
 ## How It Works
 

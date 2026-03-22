@@ -56,4 +56,6 @@ export const DEFAULT_OPTIONS = {
   maxResultSize: 100 * 1024,
   /** Alt+Click 元素检查器，默认开启 */
   inspector: true,
+  /** 语言环境，默认中文 */
+  locale: 'zh',
 } as const

@@ -191,27 +191,42 @@ export const wsClientCode = `
     postResult(result);
   }
 
+  /** 执行锁：防止快速连续代码推送时并发执行导致 snapshot 竞态 */
+  var isExecuting = false;
+  /** 排队的代码（exec 锁忙时暂存，当前 exec 完成后立即执行） */
+  var pendingCode = null;
+
   /** 执行代码并发送结果的通用处理 */
   function handleCode(code) {
+    if (isExecuting) {
+      pendingCode = code;
+      return;
+    }
+    isExecuting = true;
     var result = execCode(code);
     /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
      *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
     function sendWithSnapshot(result) {
       if (window.__pilot_snapshot && !document.hidden) {
         requestAnimationFrame(function() {
-          setTimeout(function() {
-            if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
-            sendResult(result);
-          }, 0);
+          if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+          sendResult(result);
+          /** exec 完成，检查是否有排队的代码需要执行 */
+          isExecuting = false;
+          if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
         });
       } else if (window.__pilot_snapshot) {
         /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
         setTimeout(function() {
           if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
           sendResult(result);
+          isExecuting = false;
+          if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
         }, 50);
       } else {
         sendResult(result);
+        isExecuting = false;
+        if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
       }
     }
     /** async exec 返回 Promise，需要等待完成后再采集 snapshot */

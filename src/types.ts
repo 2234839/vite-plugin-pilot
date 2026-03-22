@@ -12,6 +12,8 @@ export interface PilotOptions {
   maxResultSize?: number
   /** Alt+Click 元素检查器，默认开启。设为 false 禁用 */
   inspector?: boolean
+  /** 语言环境，默认 'zh'。支持 'zh' | 'en' */
+  locale?: 'zh' | 'en'
 }
 
 export type LogLevel = 'info' | 'warn' | 'error'

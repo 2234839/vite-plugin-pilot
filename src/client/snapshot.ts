@@ -29,6 +29,10 @@ export const snapshotCode = `
     var timestamp = new Date().toISOString();
     var url = location.href;
     var title = document.title;
+    /** 预编译正则，避免每个元素重复编译 */
+    var STYLE_RE = /width|height|color|background|opacity|transform/i;
+    var STATE_RE = /(active|selected|current|checked|open|expanded)/i;
+    var STATE_EXTRACT_RE = /(active|selected|current|checked|open|expanded)/;
 
     /** 清除不再在 DOM 中的悬空引用（HMR 替换组件后旧引用失效） */
     for (var k in window.__pilot_elements) {
@@ -38,6 +42,8 @@ export const snapshotCode = `
     }
 
     var allElements = document.body.querySelectorAll('*');
+    /** 记录当前 DOM 元素总数，供 findByText 轻量检查是否需要刷新 */
+    window.__pilot_lastElementCount = allElements.length;
 
     /** 采集可见元素 — 仅保留 AI 需要的有信息量元素 */
     var visibleElements = [];
@@ -117,7 +123,7 @@ export const snapshotCode = `
 
       var hasValue = (tagLower === 'input' || tagLower === 'textarea' || tagLower === 'select') && el.value;
       var inlineStyle = el.getAttribute('style') || '';
-      var hasStyle = /width|height|color|background|opacity|transform/i.test(inlineStyle);
+      var hasStyle = STYLE_RE.test(inlineStyle);
       var computedPos = getComputedStyle(el).position;
       var isFixedOrAbsolute = computedPos === 'fixed' || computedPos === 'absolute';
       if (isStructural && !hasText && !isInteractive && !hasId && !hasValue && !hasStyle && !isFixedOrAbsolute) return null;
@@ -132,7 +138,7 @@ export const snapshotCode = `
       }
       window.__pilot_elements[elementIdx] = el;
 
-      var entry = { tag: tagLower, idx: elementIdx };
+      var entry = { tag: tagLower, idx: elementIdx, _pos: computedPos };
       if (el.id) entry.id = el.id;
       /** select 的 text 是第一个 option 的文本，无意义；已用 value+options 替代 */
       if (txt && tagLower !== 'select') entry.text = txt;
@@ -140,8 +146,8 @@ export const snapshotCode = `
 
       if (isInteractive) {
         var cls = (el.className || '').toLowerCase();
-        if (/active|selected|current|checked|open|expanded/i.test(cls)) {
-          var match = cls.match(/(active|selected|current|checked|open|expanded)/);
+        if (STATE_RE.test(cls)) {
+          var match = cls.match(STATE_EXTRACT_RE);
           if (match) entry.state = match[1];
         }
       }
@@ -207,8 +213,7 @@ export const snapshotCode = `
       var el = allElements[i];
       var entry = processElement(el);
       if (!entry) continue;
-      var cp = getComputedStyle(el).position;
-      if ((cp === 'fixed' || cp === 'absolute') && priorityElements.length < 20) {
+      if ((entry._pos === 'fixed' || entry._pos === 'absolute') && priorityElements.length < 20) {
         entry.floating = true;
         priorityElements.push(entry);
       } else if (normalElements.length < 500) {
@@ -248,6 +253,9 @@ export const snapshotCode = `
 
     /** 合并后截断到 300 个有效元素（适应复杂页面，compact 模式会进一步压缩） */
     if (merged.length > 300) merged = merged.slice(0, 300);
+
+    /** 移除内部辅助字段 _pos（仅用于遍历阶段的 fixed/absolute 检测） */
+    for (var mi = 0; mi < merged.length; mi++) { delete merged[mi]._pos; }
 
     var result = {
       t: timestamp,
@@ -431,9 +439,13 @@ export const snapshotCode = `
     var tLower = text.toLowerCase();
     var results = searchByText(tLower);
     if (results.length === 0 && window.__pilot_snapshot) {
-      /** 未找到时自动刷新元素引用（新增的 DOM 元素可能尚未注册） */
-      window.__pilot_snapshot();
-      results = searchByText(tLower);
+      /** 轻量检查：DOM 元素数量未变化时跳过完整 snapshot（避免不存在的文本触发 ~100ms 开销） */
+      var currentCount = document.body.querySelectorAll('*').length;
+      if (currentCount !== window.__pilot_lastElementCount) {
+        window.__pilot_lastElementCount = currentCount;
+        window.__pilot_snapshot();
+        results = searchByText(tLower);
+      }
     }
     if (results.length === 0) return 'No element found with text "' + text + '"';
     results.sort(function(a, b) { return b.score - a.score || a.idx - b.idx; });
@@ -453,15 +465,24 @@ export const snapshotCode = `
     return label;
   }
 
-  window.__pilot_clickByText = function(text, nth) {
-    if (!text || !text.trim()) return 'Empty search text';
-    var CLICKABLE = { BUTTON:1, A:1, INPUT:1, SUMMARY:1, DETAILS:1 };
+  /** 通用文本匹配：搜索元素标签文本，支持标签过滤和 disabled 检查
+   *  返回匹配的目标元素，或错误字符串
+   *  opts.filterTag — 仅匹配指定 tagName 的元素（如 'INPUT' 过滤 checkbox）
+   *  opts.boostTags — 额外加分的标签集合（如 CLICKABLE）
+   *  opts.typeName — 错误消息中的元素类型名（如 'checkbox'）
+   */
+  var CLICKABLE = { BUTTON:1, A:1, INPUT:1, SUMMARY:1, DETAILS:1 };
+  function findByLabel(text, nth, opts) {
+    if (!text || !text.trim()) return { error: 'Empty search text' };
     var n = nth || 0;
     var tLower = text.toLowerCase();
+    var filterTag = opts.filterTag;
+    var boostTags = opts.boostTags;
     function find() {
       var matches = [];
       for (var k in window.__pilot_elements) {
         var el = window.__pilot_elements[k];
+        if (filterTag && el.type !== filterTag && el.type !== 'radio') continue;
         var label = getElementLabel(el);
         var labelLower = label.toLowerCase();
         var score = -1;
@@ -469,7 +490,7 @@ export const snapshotCode = `
         else if (labelLower.indexOf(tLower) === 0) score = 80;
         else if (labelLower.indexOf(tLower) !== -1) score = 50;
         if (score > 0) {
-          if (CLICKABLE[el.tagName]) score += 10;
+          if (boostTags && boostTags[el.tagName]) score += 10;
           matches.push({ idx: parseInt(k), el: el, label: label, score: score });
         }
       }
@@ -477,63 +498,39 @@ export const snapshotCode = `
     }
     var matches = find();
     if (matches.length === 0 && window.__pilot_snapshot) { window.__pilot_snapshot(); matches = find(); }
-    if (matches.length === 0) return 'No element found with text "' + text + '"';
+    if (matches.length === 0) return { error: 'No ' + (opts.typeName || 'element') + ' found with text "' + text + '"' };
     matches.sort(function(a, b) { return b.score - a.score || a.idx - b.idx; });
     if (n >= matches.length) {
-      /** 列出所有匹配的 idx+label，帮助 agent 直接使用 __pilot_click(idx) 精确操作 */
       var hint = matches.slice(0, 8).map(function(m) { return '#' + m.idx + ' "' + m.label + '"'; }).join(' | ');
-      return 'Only ' + matches.length + ' matches for "' + text + '", nth=' + n + ' out of range: ' + hint;
+      return { error: 'Only ' + matches.length + ' ' + (opts.typeName || '') + ' matches for "' + text + '", nth=' + n + ' out of range: ' + hint };
     }
-    var target = matches[n];
-    /** disabled 元素无法被点击，返回明确错误而非静默失败 */
-    if (target.el.disabled) return 'Element ' + target.idx + ' "' + target.label + '" is disabled';
-    if (target.el.type === 'checkbox' || target.el.type === 'radio') {
-      target.el.checked = !target.el.checked;
-      target.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { target: matches[n] };
+  }
+
+  window.__pilot_clickByText = function(text, nth) {
+    var result = findByLabel(text, nth, { boostTags: CLICKABLE });
+    if (result.error) return result.error;
+    var t = result.target;
+    if (t.el.disabled) return 'Element ' + t.idx + ' "' + t.label + '" is disabled';
+    if (t.el.type === 'checkbox' || t.el.type === 'radio') {
+      t.el.checked = !t.el.checked;
+      t.el.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
-      target.el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      t.el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     }
-    return 'Clicked ' + target.el.tagName + '#' + target.idx + ' "' + target.label + '"';
+    return 'Clicked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
   };
 
-  /** 按文本双击元素（复用 clickByText 的匹配逻辑）
+  /** 按文本双击元素（复用 findByLabel 匹配逻辑）
    *  用法: __pilot_dblclickByText("任务名") — 双击文本匹配的元素
    */
   window.__pilot_dblclickByText = function(text, nth) {
-    if (!text || !text.trim()) return 'Empty search text';
-    var CLICKABLE = { BUTTON:1, A:1, INPUT:1, SUMMARY:1, DETAILS:1 };
-    var n = nth || 0;
-    var tLower = text.toLowerCase();
-    function find() {
-      var matches = [];
-      for (var k in window.__pilot_elements) {
-        var el = window.__pilot_elements[k];
-        var label = getElementLabel(el);
-        var labelLower = label.toLowerCase();
-        var score = -1;
-        if (labelLower === tLower) score = 100;
-        else if (labelLower.indexOf(tLower) === 0) score = 80;
-        else if (labelLower.indexOf(tLower) !== -1) score = 50;
-        if (score > 0) {
-          if (CLICKABLE[el.tagName]) score += 10;
-          matches.push({ idx: parseInt(k), el: el, label: label, score: score });
-        }
-      }
-      return matches;
-    }
-    var matches = find();
-    if (matches.length === 0 && window.__pilot_snapshot) { window.__pilot_snapshot(); matches = find(); }
-    if (matches.length === 0) return 'No element found with text "' + text + '"';
-    matches.sort(function(a, b) { return b.score - a.score || a.idx - b.idx; });
-    if (n >= matches.length) {
-      var hint = matches.slice(0, 8).map(function(m) { return '#' + m.idx + ' "' + m.label + '"'; }).join(' | ');
-      return 'Only ' + matches.length + ' matches for "' + text + '", nth=' + n + ' out of range: ' + hint;
-    }
-    var target = matches[n];
-    /** disabled 元素无法被点击，返回明确错误而非静默失败 */
-    if (target.el.disabled) return 'Element ' + target.idx + ' "' + target.label + '" is disabled';
-    target.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }));
-    return 'DblClicked ' + target.el.tagName + '#' + target.idx + ' "' + target.label + '"';
+    var result = findByLabel(text, nth, { boostTags: CLICKABLE });
+    if (result.error) return result.error;
+    var t = result.target;
+    if (t.el.disabled) return 'Element ' + t.idx + ' "' + t.label + '" is disabled';
+    t.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }));
+    return 'DblClicked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
   };
 
   /** 按 placeholder 查找 input/textarea 并设置值
@@ -643,72 +640,24 @@ export const snapshotCode = `
    *  用法: __pilot_checkByText("我同意条款") — 勾选同意条款
    */
   window.__pilot_checkByText = function(text, nth) {
-    if (!text || !text.trim()) return 'Empty search text';
-    var n = nth || 0;
-    var tLower = text.toLowerCase();
-    function find() {
-      var matches = [];
-      for (var k in window.__pilot_elements) {
-        var el = window.__pilot_elements[k];
-        if (el.type !== 'checkbox' && el.type !== 'radio') continue;
-        var label = getElementLabel(el);
-        var labelLower = label.toLowerCase();
-        var score = -1;
-        if (labelLower === tLower) score = 100;
-        else if (labelLower.indexOf(tLower) === 0) score = 80;
-        else if (labelLower.indexOf(tLower) !== -1) score = 50;
-        if (score > 0) matches.push({ idx: parseInt(k), el: el, label: label, score: score });
-      }
-      return matches;
-    }
-    var matches = find();
-    if (matches.length === 0 && window.__pilot_snapshot) { window.__pilot_snapshot(); matches = find(); }
-    if (matches.length === 0) return 'No checkbox found with text "' + text + '"';
-    matches.sort(function(a, b) { return b.score - a.score || a.idx - b.idx; });
-    if (n >= matches.length) {
-      var hint = matches.slice(0, 8).map(function(m) { return '#' + m.idx + ' "' + m.label + '"'; }).join(' | ');
-      return 'Only ' + matches.length + ' checkbox matches for "' + text + '", nth=' + n + ' out of range: ' + hint;
-    }
-    var target = matches[n];
-    target.el.checked = true;
-    target.el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'Checked ' + target.el.tagName + '#' + target.idx + ' "' + target.label + '"';
+    var result = findByLabel(text, nth, { filterTag: 'checkbox', typeName: 'checkbox' });
+    if (result.error) return result.error;
+    var t = result.target;
+    t.el.checked = true;
+    t.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'Checked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
   };
 
   /** 按文本取消勾选 checkbox/radio（始终 unchecked，不受之前状态影响）
    *  用法: __pilot_uncheckByText("Vue")
    */
   window.__pilot_uncheckByText = function(text, nth) {
-    if (!text || !text.trim()) return 'Empty search text';
-    var n = nth || 0;
-    var tLower = text.toLowerCase();
-    function find() {
-      var matches = [];
-      for (var k in window.__pilot_elements) {
-        var el = window.__pilot_elements[k];
-        if (el.type !== 'checkbox' && el.type !== 'radio') continue;
-        var label = getElementLabel(el);
-        var labelLower = label.toLowerCase();
-        var score = -1;
-        if (labelLower === tLower) score = 100;
-        else if (labelLower.indexOf(tLower) === 0) score = 80;
-        else if (labelLower.indexOf(tLower) !== -1) score = 50;
-        if (score > 0) matches.push({ idx: parseInt(k), el: el, label: label, score: score });
-      }
-      return matches;
-    }
-    var matches = find();
-    if (matches.length === 0 && window.__pilot_snapshot) { window.__pilot_snapshot(); matches = find(); }
-    if (matches.length === 0) return 'No checkbox found with text "' + text + '"';
-    matches.sort(function(a, b) { return b.score - a.score || a.idx - b.idx; });
-    if (n >= matches.length) {
-      var hint = matches.slice(0, 8).map(function(m) { return '#' + m.idx + ' "' + m.label + '"'; }).join(' | ');
-      return 'Only ' + matches.length + ' checkbox matches for "' + text + '", nth=' + n + ' out of range: ' + hint;
-    }
-    var target = matches[n];
-    target.el.checked = false;
-    target.el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'Unchecked ' + target.el.tagName + '#' + target.idx + ' "' + target.label + '"';
+    var result = findByLabel(text, nth, { filterTag: 'checkbox', typeName: 'checkbox' });
+    if (result.error) return result.error;
+    var t = result.target;
+    t.el.checked = false;
+    t.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'Unchecked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
   };
 
   /** 异步等待指定毫秒数（仅在 async exec 中使用）
@@ -728,37 +677,58 @@ export const snapshotCode = `
     var ms = timeout || 5000;
     var disappear = !!waitForDisappear;
     var tLower = text.toLowerCase();
-    var interval = 200;
+
+    /** 轻量文本搜索（不触发完整 snapshot，仅遍历已有元素引用） */
+    function searchExisting() {
+      var found = false;
+      for (var k in window.__pilot_elements) {
+        var el = window.__pilot_elements[k];
+        if (el.offsetParent === null) continue;
+        var label = getElementLabel(el);
+        if (disappear) {
+          if (label.toLowerCase() === tLower) { found = true; break; }
+        } else {
+          if (label.toLowerCase().indexOf(tLower) !== -1) { found = true; break; }
+        }
+        if ((el.placeholder || '').toLowerCase().indexOf(tLower) !== -1) { found = true; break; }
+        if ((el.value || '').toLowerCase().indexOf(tLower) !== -1) { found = true; break; }
+      }
+      return found;
+    }
+
     return new Promise(function(resolve) {
-      var elapsed = 0;
-      var timer = setInterval(function() {
-        elapsed += interval;
-        if (elapsed >= ms) {
-          clearInterval(timer);
-          resolve(disappear ? 'Timeout (text still present)' : 'Timeout (text not found)');
-          return;
-        }
-        window.__pilot_snapshot();
-        var found = false;
-        for (var k in window.__pilot_elements) {
-          var el = window.__pilot_elements[k];
-          /** 跳过不可见元素（display:none 的容器可能仍包含目标文本） */
-          if (el.offsetParent === null) continue;
-          var label = getElementLabel(el);
-          if (disappear) {
-            /** disappear 模式使用精确匹配，避免"已确认操作"匹配"确认操作"导致永远不满足 */
-            if (label.toLowerCase() === tLower) { found = true; break; }
-          } else {
-            if (label.toLowerCase().indexOf(tLower) !== -1) { found = true; break; }
-          }
-          if ((el.placeholder || '').toLowerCase().indexOf(tLower) !== -1) { found = true; break; }
-          if ((el.value || '').toLowerCase().indexOf(tLower) !== -1) { found = true; break; }
-        }
-        if (disappear ? !found : found) {
-          clearInterval(timer);
+      /** 立即检查一次（条件可能已经满足） */
+      window.__pilot_snapshot();
+      if (disappear ? !searchExisting() : searchExisting()) {
+        resolve(disappear ? 'Disappeared: "' + text + '"' : 'Found: "' + text + '"');
+        return;
+      }
+
+      /** 用 MutationObserver 监听 DOM 变化，变化后立即轻量搜索（无需完整 snapshot） */
+      var observer = new MutationObserver(function() {
+        if (disappear ? !searchExisting() : searchExisting()) {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
           resolve(disappear ? 'Disappeared: "' + text + '"' : 'Found: "' + text + '"');
         }
-      }, interval);
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+      /** fallback：MutationObserver 可能遗漏（React 不走 DOM mutation），200ms 轮询兜底 */
+      var fallbackTimer = setInterval(function() {
+        if (disappear ? !searchExisting() : searchExisting()) {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
+          resolve(disappear ? 'Disappeared: "' + text + '"' : 'Found: "' + text + '"');
+        }
+      }, 200);
+
+      /** 超时清理 */
+      setTimeout(function() {
+        observer.disconnect();
+        clearTimeout(fallbackTimer);
+        resolve(disappear ? 'Timeout (text still present)' : 'Timeout (text not found)');
+      }, ms);
     });
   };
 
@@ -770,26 +740,43 @@ export const snapshotCode = `
   window.__pilot_waitEnabled = function(text, timeout) {
     var ms = timeout || 5000;
     var tLower = text.toLowerCase();
-    var interval = 200;
+
+    function checkEnabled() {
+      var results = searchByText(tLower);
+      for (var ri = 0; ri < results.length; ri++) {
+        var el = window.__pilot_elements[results[ri].idx];
+        if (el && !el.disabled) return true;
+      }
+      return false;
+    }
+
     return new Promise(function(resolve) {
-      var elapsed = 0;
-      var timer = setInterval(function() {
-        elapsed += interval;
-        if (elapsed >= ms) {
-          clearInterval(timer);
-          resolve('Timeout (element still disabled)');
-          return;
+      if (checkEnabled()) { resolve('Enabled: "' + text + '"'); return; }
+
+      /** MutationObserver 监听属性变化（disabled 移除），立即检查 */
+      var observer = new MutationObserver(function() {
+        if (checkEnabled()) {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
+          resolve('Enabled: "' + text + '"');
         }
-        var results = searchByText(tLower);
-        for (var ri = 0; ri < results.length; ri++) {
-          var el = window.__pilot_elements[results[ri].idx];
-          if (el && !el.disabled) {
-            clearInterval(timer);
-            resolve('Enabled: "' + text + '"');
-            return;
-          }
+      });
+      observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['disabled'] });
+
+      /** fallback：200ms 轮询兜底 */
+      var fallbackTimer = setInterval(function() {
+        if (checkEnabled()) {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
+          resolve('Enabled: "' + text + '"');
         }
-      }, interval);
+      }, 200);
+
+      setTimeout(function() {
+        observer.disconnect();
+        clearTimeout(fallbackTimer);
+        resolve('Timeout (element still disabled)');
+      }, ms);
     });
   };
 
