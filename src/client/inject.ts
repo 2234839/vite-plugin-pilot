@@ -13,7 +13,7 @@ export function buildInjectScript(options: ResolvedPilotOptions, pilotVersion?: 
 
   const scripts = [
     { name: 'Log Collector', code: logCollectorCode },
-    { name: 'WS Client (HTTP polling)', code: wsClientCode },
+    { name: 'SSE Client', code: wsClientCode },
     { name: 'Page Snapshot', code: snapshotCode },
     { name: 'Element Inspector', code: elementInspectorCode },
   ]

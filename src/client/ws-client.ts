@@ -1,20 +1,21 @@
 /**
  * 客户端通信代码（字符串形式，用于注入到浏览器）
  *
- * 策略：纯 HTTP 轮询
- * import.meta.hot 在 transformIndexHtml 注入的脚本中不可用，
- * 因此 WS 通道在服务端侧保留但客户端不使用
+ * 策略：SSE（Server-Sent Events）接收代码推送
+ * EventSource 不支持自定义 headers，instance 和 version 通过 query params 传递
  */
 
 export const wsClientCode = `
 (function() {
-  /** HMR 代际计数器：旧实例的 check 函数通过比对代际自动停止 */
+  /** HMR 代际计数器：旧实例的 SSE 通过比对代际自动关闭 */
   window.__pilot_gen = (window.__pilot_gen || 0) + 1;
   var myGen = window.__pilot_gen;
 
-  /** 清理旧实例的定时器和监听器 */
-  if (window.__pilot_ws_checkInterval) clearInterval(window.__pilot_ws_checkInterval);
-  if (window.__pilot_ws_visHandler) document.removeEventListener('visibilitychange', window.__pilot_ws_visHandler);
+  /** 清理旧实例的 SSE 连接 */
+  if (window.__pilot_es) {
+    window.__pilot_es.close();
+    window.__pilot_es = null;
+  }
 
   var execTimeout = __EXEC_TIMEOUT__;
   var maxResultSize = __MAX_RESULT_SIZE__;
@@ -182,7 +183,6 @@ export const wsClientCode = `
     fetch('/__pilot/done', { method: 'POST', headers: pilotHeaders() }).catch(function() {});
   }
 
-  /** 启动 HTTP 轮询 */
   /** 公共请求头（包含版本和实例 ID） */
   function pilotHeaders() {
     return {
@@ -191,95 +191,63 @@ export const wsClientCode = `
     };
   }
 
-  function startPolling() {
-    /** 执行代码并发送结果的通用处理 */
-    function handleCode(code) {
-      var result = execCode(code);
-      /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
-       *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
-      function sendWithSnapshot(result) {
-        if (window.__pilot_snapshot && !document.hidden) {
-          requestAnimationFrame(function() {
-            setTimeout(function() {
-              if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
-              sendResult(result);
-            }, 0);
-          });
-        } else if (window.__pilot_snapshot) {
-          /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
+  /** 执行代码并发送结果的通用处理 */
+  function handleCode(code) {
+    var result = execCode(code);
+    /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
+     *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
+    function sendWithSnapshot(result) {
+      if (window.__pilot_snapshot && !document.hidden) {
+        requestAnimationFrame(function() {
           setTimeout(function() {
             if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
             sendResult(result);
-          }, 50);
-        } else {
-          sendResult(result);
-        }
-      }
-      /** async exec 返回 Promise，需要等待完成后再采集 snapshot */
-      if (result && typeof result.then === 'function') {
-        result.then(function(r) { sendWithSnapshot(r); });
-      } else {
-        sendWithSnapshot(result);
-      }
-      if (window.__pilot_postSnapshot) setTimeout(window.__pilot_postSnapshot, 500);
-    }
-
-    /** 短轮询（1s）：前台 tab 即时响应 */
-    function check() {
-      /** HMR 代际检查：旧实例自动停止轮询 */
-      if (myGen !== window.__pilot_gen) return;
-
-      fetch('/__pilot/check?t=' + Date.now(), {
-        headers: pilotHeaders()
-      })
-        .then(function(r) {
-          /** 版本不匹配时服务端返回 X-Pilot-Reload 头，自动刷新页面 */
-          if (r.headers.get('x-pilot-reload') === '1') { location.reload(); return; }
-          if (r.status === 200) return r.text();
-          return null;
-        })
-        .then(function(code) {
-          if (code) handleCode(code);
-        })
-        .catch(function() {});
-    }
-
-    /** 长轮询：后台 tab 保活，服务端 hold 最多 25s 直到有代码 */
-    function longPoll() {
-      if (myGen !== window.__pilot_gen) return;
-
-      fetch('/__pilot/check?wait=1&t=' + Date.now(), {
-        headers: pilotHeaders()
-      })
-        .then(function(r) {
-          /** 版本不匹配时服务端返回 X-Pilot-Reload 头，自动刷新页面 */
-          if (r.headers.get('x-pilot-reload') === '1') { location.reload(); return; }
-          if (r.status === 200) return r.text();
-          return null;
-        })
-        .then(function(code) {
-          if (code) handleCode(code);
-          /** 无论是否有代码，立即发起新的长轮询 */
-          if (myGen === window.__pilot_gen) longPoll();
-        })
-        .catch(function() {
-          /** 网络错误时 5s 后重试 */
-          if (myGen === window.__pilot_gen) setTimeout(longPoll, 5000);
+          }, 0);
         });
+      } else if (window.__pilot_snapshot) {
+        /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
+        setTimeout(function() {
+          if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+          sendResult(result);
+        }, 50);
+      } else {
+        sendResult(result);
+      }
     }
-
-    check();
-    longPoll();
-    window.__pilot_ws_checkInterval = setInterval(check, 1000);
-
-    /** 页面重新可见时立即检查（绕过后台 tab 节流） */
-    window.__pilot_ws_visHandler = function() {
-      if (!document.hidden) check();
-    };
-    document.addEventListener('visibilitychange', window.__pilot_ws_visHandler);
+    /** async exec 返回 Promise，需要等待完成后再采集 snapshot */
+    if (result && typeof result.then === 'function') {
+      result.then(function(r) { sendWithSnapshot(r); });
+    } else {
+      sendWithSnapshot(result);
+    }
+    if (window.__pilot_postSnapshot) setTimeout(window.__pilot_postSnapshot, 500);
   }
 
-  console.log('[Pilot] Running with HTTP polling (gen=' + myGen + ')');
-  startPolling();
+  /** 通过 SSE 接收代码推送，替代 HTTP 轮询 */
+  function connectSSE() {
+    var url = '/__pilot/sse?instance=' + __pilot_instanceId + '&version=' + __PILOT_VERSION__;
+    var es = new EventSource(url);
+    window.__pilot_es = es;
+
+    es.addEventListener('code', function(e) {
+      if (myGen !== window.__pilot_gen) return;
+      handleCode(e.data);
+    });
+
+    es.addEventListener('reload', function() {
+      es.close();
+      location.reload();
+    });
+
+    es.onerror = function() {
+      /** EventSource 浏览器自动重连，仅在代际过期时手动关闭 */
+      if (myGen !== window.__pilot_gen) {
+        es.close();
+      }
+    };
+  }
+
+  console.log('[Pilot] Running with SSE (gen=' + myGen + ')');
+  connectSSE();
 })();
 `

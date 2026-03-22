@@ -32,13 +32,32 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     bridge.writeVersion(pilotVersion)
   }
 
-  /** /check 长轮询等待者队列（按实例隔离） */
+  /** /check 长轮询等待者队列（按实例隔离，保留作为 fallback） */
   const checkWaiters: Record<string, Array<{ res: ServerResponse; timer: NodeJS.Timeout }>> = {}
+
+  /** SSE 连接池（按实例隔离） */
+  const sseConnections: Record<string, Array<ServerResponse>> = {}
+
+  /** 向指定实例的所有 SSE 连接广播代码 */
+  function broadcastCode(instanceId: string, code: string): void {
+    const connections = sseConnections[instanceId]
+    if (!connections || connections.length === 0) return
+    for (const res of connections) {
+      res.write(`event: code\ndata: ${code}\n\n`)
+    }
+  }
+
+  /** 向指定实例的所有 SSE 连接发送 reload 指令 */
+  function broadcastReload(instanceId: string): void {
+    const connections = sseConnections[instanceId]
+    if (!connections || connections.length === 0) return
+    for (const res of connections) {
+      res.write(`event: reload\ndata: 1\n\n`)
+    }
+  }
 
   /** 唤醒 /check 长轮询等待者，返回队列中的待执行代码 */
   function wakeCheckWaiters(instanceId: string): void {
-    const waiters = checkWaiters[instanceId]
-    if (!waiters || waiters.length === 0) return
     const fileCode = bridge.readPendingJs(instanceId)
     const queue = pendingCodeQueues[instanceId]
     const code = fileCode ?? queue?.shift()
@@ -46,10 +65,20 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     /** 新代码分发时清除旧结果 */
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
-    /** 只唤醒一个等待者（FIFO） */
+    lastBrowserActivity[instanceId] = Date.now()
+
+    /** 优先通过 SSE 广播给所有连接 */
+    const sseConns = sseConnections[instanceId]
+    if (sseConns && sseConns.length > 0) {
+      broadcastCode(instanceId, code)
+      return
+    }
+
+    /** fallback：唤醒长轮询等待者（FIFO） */
+    const waiters = checkWaiters[instanceId]
+    if (!waiters || waiters.length === 0) return
     const waiter = waiters.shift()!
     clearTimeout(waiter.timer)
-    lastBrowserActivity[instanceId] = Date.now()
     waiter.res.writeHead(200, {
       'Content-Type': 'text/plain',
       'Cache-Control': 'no-cache, no-store',
@@ -137,6 +166,69 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           } else {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true }))
+          }
+        })
+        return
+      }
+
+      /** ---------- GET /__pilot/sse ---------- */
+      if (endpoint === PILOT_ENDPOINTS.sse && req.method === 'GET') {
+        const url = new URL(req.url, 'http://localhost')
+        const sseInstance = url.searchParams.get('instance') || instanceId
+        const clientVersion = url.searchParams.get('version')
+
+        lastBrowserActivity[sseInstance] = Date.now()
+
+        /** 注册实例信息 */
+        const referer = req.headers.referer
+        if (referer) {
+          try {
+            const urlObj = new URL(referer)
+            bridge.writeActiveInstance(sseInstance, urlObj.pathname)
+          } catch { /* ignore */ }
+        }
+
+        /** 版本不匹配时立即返回 reload 指令然后关闭连接 */
+        if (clientVersion && pilotVersion && clientVersion !== pilotVersion) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+          })
+          res.write('event: reload\ndata: 1\n\n')
+          res.end()
+          return
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        })
+        res.write('event: ping\ndata: connected\n\n')
+
+        if (!sseConnections[sseInstance]) sseConnections[sseInstance] = []
+        sseConnections[sseInstance].push(res)
+
+        /** 定期检查 pending.js 文件（CLI 文件通道写入的代码），
+         *  有代码时立即通过 SSE 推送给浏览器 */
+        const filePollTimer = setInterval(() => {
+          const fileCode = bridge.readPendingJs(sseInstance)
+          if (!fileCode) return
+          bridge.clearExecResult(sseInstance)
+          bridge.clearExecDone(sseInstance)
+          lastBrowserActivity[sseInstance] = Date.now()
+          broadcastCode(sseInstance, fileCode)
+        }, 1000)
+
+        req.on('close', () => {
+          clearInterval(filePollTimer)
+          const conns = sseConnections[sseInstance]
+          if (conns) {
+            const idx = conns.indexOf(res)
+            if (idx !== -1) conns.splice(idx, 1)
           }
         })
         return

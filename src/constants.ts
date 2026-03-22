@@ -20,6 +20,8 @@ export const PILOT_ENDPOINTS = {
   snapshot: `${PILOT_PREFIX}/snapshot`,
   /** POST - 标记执行完成（浏览器通知 AI） */
   done: `${PILOT_PREFIX}/done`,
+  /** GET - SSE 推送待执行代码 */
+  sse: `${PILOT_PREFIX}/sse`,
 } as const
 
 /** .pilot 目录下的文件名 */
