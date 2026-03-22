@@ -16,8 +16,9 @@ export const elementInspectorCode = `
   var tooltip = null;
   /** 面板打开时保持高亮，忽略 Alt 键松开 */
   var panelOpen = false;
-  /** pilot-channel server 地址（Claude Code Channels 功能） */
-  var CHANNEL_URL = 'http://127.0.0.1:8789/message';
+  /** pilot-channel server 地址（Claude Code Channels 功能）
+   *  使用 location.hostname 动态获取，兼容 WSL2 等非 localhost 场景 */
+  var CHANNEL_URL = 'http://' + location.hostname + ':8789/message';
 
   function createOverlay() {
     overlay = document.createElement('div');

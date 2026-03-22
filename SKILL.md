@@ -75,6 +75,9 @@ npx pilot help                    # 查看辅助函数列表
   }
 }
 ```
-2. 提示用户：使用 channel server 时需以 `claude --dangerously-load-development-channels server:pilot-channel` 启动 Claude Code。如果用户不使用 Alt+Click 推送功能，可以忽略此步骤
+2. 提示用户：使用 channel server 时需以 `claude --dangerously-load-development-channels server:pilot-channel` 启动 Claude Code。如果用户不使用 Alt+Click 推送功能，可以忽略此步骤。注意说明以下启动方式：
+   - **CLI**：直接在终端运行上述命令
+   - **VSCode 集成终端**：在 VSCode 终端中运行上述命令（推荐，同时享受 IDE 集成和 channel 推送）
+   - **VSCode 图形面板**：需配置 `claudeProcessWrapper` 创建 wrapper 脚本注入 `--dangerously-load-development-channels server:pilot-channel` 参数，并在 settings 中设置 `"claudeCode.useTerminal": false`
 
 浏览器端「发送给 Claude」按钮会在 channel server 运行时自动可用，未启动时显示「未连接」。
