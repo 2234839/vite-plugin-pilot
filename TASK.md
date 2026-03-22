@@ -8,6 +8,8 @@
 
 ## TASKS
 
+[x]要不还是换个思路吧，咱们配置一个项目级的插件，然后在用户输入提示词的时候，将之前通过网页发送过来的指令叠在一起发出去，你看这作为一种claude Channel不能使用的降级方案的话有可行性没有？
+[x]claude Channel 是需要帐号在研究预览列表中才能使用，这个目前还是不方便使用，我觉得可以探索一下  https://code.claude.com/docs/en/remote-control#enable-remote-control-for-all-sessions
 [x]多语言应该让 skill 根据项目情况自行分析然后配置中文还是英文
 [x]Channel Server机制好像不太行，配置项目级 claude code 插件可以来实现这个功能吗，然后让 skill 在首次安装时自行配置
 [x]咱们的开发工具要考虑语言环境，无论是从生成的文本还是复制的提示词或者ui界面文本，都要考虑这个语言环境，这个语言环境本身也是在vite中配置的，配置它是什么语言，目前主要支持中英双语。
@@ -25,3 +27,6 @@
 - 语言环境支持：`pilot({ locale: 'en' })` 切换中英文 UI（默认 zh）
 - 多语言自动检测：SKILL.md 指导 skill 在首次配置时根据项目语言环境自动设置 locale
 - Channel Server 项目级配置：通过 .mcp.json 自动注册 MCP server，skill 首次配置时自动创建
+- Channel Server 降级方案：UserPromptSubmit hook 自动附加浏览器消息到用户下次输入（无需 Channels API）
+- CLI HTTP 优先模式：`pilot run/page/logs` 优先通过 HTTP API 通信（~10-50ms），HTTP 不可用时自动 fallback 到文件通道
+- SSE 心跳：服务端每 30s 发送 ping 事件，防止代理/防火墙静默断开空闲连接

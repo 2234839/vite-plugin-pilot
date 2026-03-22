@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /**
  * pilot — vite-plugin-pilot 的 agent 友好 CLI
- * 纯文件 I/O，不依赖 HTTP 接口
+ *
+ * 双模式运行：
+ * 1. HTTP 模式（优先）：通过 curl 一步获取结果，延迟更低
+ * 2. 文件通道模式（fallback）：通过文件 I/O 等待结果，不依赖 HTTP
  *
  * 用法:
  *   npx pilot run '1+1'            执行 JS 并获取结果+日志+页面快照
- *   npx pilot run 'code' page logs 执行并附带页面快照+日志（同默认行为）
+ *   npx pilot run 'code' nopage    执行但不附带页面快照
+ *   npx pilot run 'code' nologs    执行但不附带日志
  *   npx pilot page                 读取页面快照（默认实时采集）
  *   npx pilot page cached          读取缓存的页面快照
  *   npx pilot logs                 读取最近 exec 的控制台日志
@@ -14,6 +18,7 @@
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync, mkdirSync, watch as fsWatch } from 'fs'
 import { dirname, join, resolve } from 'path'
+import http from 'http'
 
 const PILOT_FILES = {
   dir: '.pilot',
@@ -23,6 +28,52 @@ const PILOT_FILES = {
   compactSnapshot: 'compact-snapshot.txt',
   recentLogs: 'recent-logs.txt',
   execDone: 'exec-done',
+}
+
+/**
+ * 从 .pilot/port.txt 读取 dev server 端口
+ */
+function getServerPort(pilotDir) {
+  const portFile = join(pilotDir, 'port.txt')
+  const content = readFileSafe(portFile)
+  return content ? parseInt(content, 10) : 0
+}
+
+/**
+ * 通过 HTTP API 发送请求（bypass 代理，自动携带 instance header）
+ * 返回 { status, body } 或 null（连接失败）
+ */
+function httpGet(path, port, instanceId, timeoutMs = 30000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      req.destroy()
+      resolve(null)
+    }, timeoutMs)
+
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port,
+      path,
+      headers: { 'X-Pilot-Instance': instanceId },
+      timeout: timeoutMs,
+    }, (res) => {
+      let body = ''
+      res.on('data', (c) => { body += c })
+      res.on('end', () => {
+        clearTimeout(timer)
+        resolve({ status: res.statusCode, body })
+      })
+    })
+    req.on('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+    req.on('timeout', () => {
+      clearTimeout(timer)
+      req.destroy()
+      resolve(null)
+    })
+  })
 }
 
 /**
@@ -240,12 +291,42 @@ async function main() {
         process.exit(1)
       }
 
+      const showLogs = !flags.nologs
+      const showPage = !flags.nopage
+
+      /** 优先尝试 HTTP API（一步获取结果，延迟更低） */
+      const port = getServerPort(pilotDir)
+      if (port) {
+        const params = new URLSearchParams({ code, instance: instanceId })
+        if (showPage) params.set('page', '1')
+        if (showLogs) params.set('logs', '1')
+        const result = await httpGet(`/__pilot/run?${params}`, port, instanceId, 35000)
+        if (result && result.status === 200) {
+          console.log(result.body)
+          break
+        }
+        /** HTTP 返回 NO_BROWSER/TIMEOUT 时 fallback 到文件通道 */
+        if (result && (result.status === 503 || result.status === 504)) {
+          /** 503=无浏览器，直接退出不 fallback */
+          if (result.status === 503) {
+            console.error(result.body)
+            process.exit(1)
+          }
+          /** 504=超时，输出已有日志 */
+          const instanceDir = getInstanceDir(pilotDir, instanceId)
+          const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
+          if (logs) console.error('TIMEOUT\n---\n' + logs)
+          else console.error('TIMEOUT')
+          process.exit(1)
+        }
+      }
+
+      /** 文件通道 fallback */
       writePendingJs(pilotDir, instanceId, code)
 
       const doneFile = join(getInstanceDir(pilotDir, instanceId), PILOT_FILES.execDone)
       const ok = await waitForFile(doneFile, 30000)
       if (!ok) {
-        /** 超时时输出已有日志，帮助 agent 诊断为什么浏览器未响应 */
         const instanceDir = getInstanceDir(pilotDir, instanceId)
         const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
         if (logs) console.error('TIMEOUT\n---\n' + logs)
@@ -256,18 +337,11 @@ async function main() {
       const instanceDir = getInstanceDir(pilotDir, instanceId)
       let output = readFileSafe(join(instanceDir, PILOT_FILES.resultTxt)) || ''
 
-      /** 默认附带日志和页面快照，agent 无需手动指定 page/logs。
-       *  传 nopage/nologs 可关闭 */
-      const showLogs = !flags.nologs
-      const showPage = !flags.nopage
-
       if (showLogs) {
         const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
         if (logs) output += '\n---\n' + logs
       }
       if (showPage) {
-        /** 优先从 exec-result.json 读取 snapshotText（与 exec-done 同步写入），
-         *  fallback 到 compact-snapshot.txt（可能在 exec-done 后才更新） */
         const execResult = readJsonSafe(join(instanceDir, 'exec-result.json'))
         const snapshot = execResult?.snapshotText || readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
         if (snapshot) output += '\n---\n' + snapshot
@@ -283,17 +357,35 @@ async function main() {
         process.exit(1)
       }
 
+      /** 优先尝试 HTTP API */
+      const port = getServerPort(pilotDir)
+      if (port && !flags.cached) {
+        const params = new URLSearchParams({ fresh: '1', instance: instanceId })
+        const result = await httpGet(`/__pilot/page?${params}`, port, instanceId, 10000)
+        if (result && result.status === 200) {
+          console.log(result.body)
+          break
+        }
+        /** 504=超时，降级到缓存 */
+        if (result && result.status === 504) {
+          const instanceDir = getInstanceDir(pilotDir, instanceId)
+          const cached = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
+          console.log(cached || 'NO_SNAPSHOT')
+          break
+        }
+        /** 503=无浏览器，降级到文件通道尝试 */
+      }
+
+      /** 文件通道 fallback */
       const instanceDir = getInstanceDir(pilotDir, instanceId)
 
       if (!flags.cached) {
-        /** 默认 fresh：写入 snapshot 采集代码，等待浏览器执行 */
         const snapshotCode = 'JSON.stringify(window.__pilot_snapshot && window.__pilot_snapshot())'
         writePendingJs(pilotDir, instanceId, snapshotCode)
 
         const doneFile = join(instanceDir, PILOT_FILES.execDone)
         const ok = await waitForFile(doneFile, 10000)
         if (!ok) {
-          /** 超时降级到缓存 */
           const cached = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
           console.log(cached || 'NO_SNAPSHOT')
           break
@@ -301,8 +393,6 @@ async function main() {
       }
 
       const snapshot = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
-      /** page 命令的 snapshot 代码执行会污染 result.txt（写入 JSON snapshot），
-       *  删除 result.txt 避免 run 命令读到过期数据 */
       const resultFile = join(instanceDir, PILOT_FILES.resultTxt)
       if (existsSync(resultFile)) unlinkSync(resultFile)
       console.log(snapshot || 'NO_SNAPSHOT')
@@ -313,6 +403,17 @@ async function main() {
       if (!pilotDir) {
         console.error('NO_LOGS')
         process.exit(1)
+      }
+
+      /** 优先尝试 HTTP API */
+      const port = getServerPort(pilotDir)
+      if (port) {
+        const params = new URLSearchParams({ instance: instanceId })
+        const result = await httpGet(`/__pilot/logs?${params}`, port, instanceId, 5000)
+        if (result && result.status === 200) {
+          console.log(result.body)
+          break
+        }
       }
 
       const logs = readFileSafe(join(getInstanceDir(pilotDir, instanceId), PILOT_FILES.recentLogs))
@@ -360,7 +461,7 @@ async function main() {
 
     case 'help':
     default:
-      console.log(`pilot — vite-plugin-pilot CLI (文件 I/O 模式)
+      console.log(`pilot — vite-plugin-pilot CLI (HTTP 优先，文件通道 fallback)
 
 用法: pilot <command> [args]
 

@@ -172,6 +172,11 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         if (!sseConnections[sseInstance]) sseConnections[sseInstance] = []
         sseConnections[sseInstance].push(res)
 
+        /** 每 30s 发送心跳，防止代理/防火墙静默断开空闲 SSE 连接 */
+        const heartbeat = setInterval(() => {
+          res.write('event: ping\ndata: 1\n\n')
+        }, 30_000)
+
         /** 用 fs.watch 监听实例目录变化，CLI 写入 pending.js 时即时推送
          *  失败时 fallback 到 1s setInterval 轮询（网络文件系统、Docker 挂载等场景） */
         const instanceDir = bridge.getInstanceDir(sseInstance)
@@ -212,6 +217,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         }
 
         req.on('close', () => {
+          clearInterval(heartbeat)
           const conns = sseConnections[sseInstance]
           if (conns) {
             const idx = conns.indexOf(res)

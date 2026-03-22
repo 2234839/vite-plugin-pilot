@@ -5,7 +5,7 @@ description: 通过 vite-plugin-pilot 在浏览器中测试页面。当需要查
 
 # vite-plugin-pilot — 浏览器页面测试
 
-通过文件 I/O 在浏览器执行 JS，用于查看页面状态、交互和验证功能。
+通过 HTTP API + SSE 在浏览器执行 JS，用于查看页面状态、交互和验证功能。
 
 ## 首次配置（仅初次安装时执行）
 
@@ -59,9 +59,9 @@ npx pilot help                    # 查看辅助函数列表
 
 ## Channel Server（浏览器直连 Claude Code）
 
-通过 Claude Code Channels API，浏览器中 Alt+Click 的提示词可直接推送到当前 Claude Code session（主动推送，非轮询）。
+浏览器中 Alt+Click 的提示词可直接发送到当前 Claude Code session。
 
-**架构**：浏览器 Alt+Click → HTTP POST → pilot-channel（MCP stdio）→ Claude Code session
+**架构**：浏览器 Alt+Click → HTTP POST → pilot-channel → `.pilot/channel-pending.txt` → UserPromptSubmit hook → Claude Code 自动附加到用户下次输入
 
 **首次配置**（skill 自动执行）：
 1. 确认项目根目录存在 `.mcp.json`，内容如下（不存在则创建）：
@@ -75,9 +75,22 @@ npx pilot help                    # 查看辅助函数列表
   }
 }
 ```
-2. 提示用户：使用 channel server 时需以 `claude --dangerously-load-development-channels server:pilot-channel` 启动 Claude Code。如果用户不使用 Alt+Click 推送功能，可以忽略此步骤。注意说明以下启动方式：
-   - **CLI**：直接在终端运行上述命令
-   - **VSCode 集成终端**：在 VSCode 终端中运行上述命令（推荐，同时享受 IDE 集成和 channel 推送）
-   - **VSCode 图形面板**：需配置 `claudeProcessWrapper` 创建 wrapper 脚本注入 `--dangerously-load-development-channels server:pilot-channel` 参数，并在 settings 中设置 `"claudeCode.useTerminal": false`
+2. 确认 `.claude/settings.local.json` 存在并包含 hook 配置（不存在则创建）：
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node node_modules/vite-plugin-pilot/bin/pilot-hook-channel.js"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
-浏览器端「发送给 Claude」按钮会在 channel server 运行时自动可用，未启动时显示「未连接」。
+浏览器端「发送给 Claude」按钮会在 pilot-channel server 运行时自动可用（dev server 启动时自动通过 `.mcp.json` 启动）。发送后，用户在 Claude Code 中输入任意内容时，消息会自动附加。

@@ -2,22 +2,30 @@
 /**
  * vite-plugin-pilot Channel Server
  *
- * 作为 Claude Code 的 Channel MCP Server 运行，
- * 接收浏览器端 Alt+Click 选中元素的提示词，推送到当前 Claude Code session。
+ * 双模式运行：
+ * 1. Channel 模式（MCP stdio）：作为 Claude Code 的 Channel MCP Server，
+ *    通过 MCP notification 主动推送消息到 Claude Code session
+ * 2. 降级模式（文件传递）：浏览器消息写入 .pilot/channel-pending.txt，
+ *    通过 Claude Code 的 UserPromptSubmit hook 在用户下次输入时自动附加
  *
  * 使用方式：
- *   claude --dangerously-load-development-channels server:pilot-channel
+ *   node bin/pilot-channel.js
  *
  * 启动后浏览器端 Alt+Click 元素面板中的「发送给 Claude」按钮
- * 会通过 HTTP POST 将提示词发送到本 server，
- * 再通过 MCP notification 推送到 Claude Code session。
+ * 会通过 HTTP POST 将提示词发送到本 server。
  *
- * 零外部依赖：手动实现 MCP stdio 协议（JSON-RPC 2.0 over stdin/stdout）
+ * 零外部依赖：Channel 模式需要手动实现 MCP stdio 协议
  */
 
 import { createServer } from 'http'
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 
 const CHANNEL_PORT = 8789
+/** 降级文件路径（与 .pilot 目录一致） */
+const PILOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.pilot')
+const PENDING_FILE = join(PILOT_DIR, 'channel-pending.txt')
 
 /** 发送 JSON-RPC 2.0 消息到 stdout（Claude Code 读取 stdin） */
 function sendJsonrpc(message) {
@@ -96,7 +104,11 @@ const httpServer = createServer((req, res) => {
           res.end(JSON.stringify({ error: 'missing message field' }))
           return
         }
+        /** 双写：Channel 模式推送到 Claude Code session */
         pushToClaude(message, data.meta)
+        /** 降级模式：写入 pending 文件，UserPromptSubmit hook 会读取 */
+        if (!existsSync(PILOT_DIR)) mkdirSync(PILOT_DIR, { recursive: true })
+        writeFileSync(PENDING_FILE, message, 'utf-8')
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true }))
       } catch {

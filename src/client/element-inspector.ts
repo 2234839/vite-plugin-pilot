@@ -19,6 +19,8 @@ export const elementInspectorCode = `
   /** pilot-channel server 地址（Claude Code Channels 功能）
    *  使用 location.hostname 动态获取，兼容 WSL2 等非 localhost 场景 */
   var CHANNEL_URL = 'http://' + location.hostname + ':8789/message';
+  /** channel server 健康检查 URL */
+  var CHANNEL_HEALTH_URL = 'http://' + location.hostname + ':8789/health';
 
   function createOverlay() {
     overlay = document.createElement('div');
@@ -227,6 +229,19 @@ export const elementInspectorCode = `
     document.body.appendChild(panel);
     panelOpen = true;
 
+    /** 预检测 channel server 连通性，未连接时禁用发送按钮 */
+    var sendBtn = document.getElementById('__pilot-prompt-send');
+    fetch(CHANNEL_HEALTH_URL, { signal: AbortSignal.timeout(1500) })
+      .then(function() { /* channel server 可用，按钮保持启用 */ })
+      .catch(function() {
+        if (sendBtn) {
+          sendBtn.textContent = '__LOCALE_NOT_CONNECTED__';
+          sendBtn.style.background = '#475569';
+          sendBtn.style.cursor = 'not-allowed';
+          sendBtn.disabled = true;
+        }
+      });
+
     /** 聚焦输入框 */
     var textarea = document.getElementById('__pilot-prompt-input');
     var timerSpan = document.getElementById('__pilot-prompt-timer');
@@ -282,6 +297,7 @@ export const elementInspectorCode = `
 
     /** 发送给 Claude 按钮（通过 pilot-channel server 推送到 Claude Code session） */
     document.getElementById('__pilot-prompt-send').onclick = function() {
+      if (this.disabled) return;
       var text = getPromptText();
       var btn = document.getElementById('__pilot-prompt-send');
       var originalText = btn.textContent;

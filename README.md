@@ -19,7 +19,7 @@ A Vite plugin that lets AI agents (Claude Code, Cursor, etc.) **see, interact wi
 - **Auto Reload** — Browser auto-refreshes when dev server restarts
 - **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
 - **Element Inspector** — Alt+Click any element to generate a prompt with full context for AI agents
-- **Channel Server** — Push prompts directly to Claude Code session via Channels API
+- **Channel Server** — Push prompts directly to Claude Code session via hook-based integration
 
 ## Why Not Chrome DevTools MCP?
 
@@ -54,7 +54,7 @@ follow its instructions to install vite-plugin-pilot and configure yourself, the
 
 ## Browser-to-Claude Code (Channel Server)
 
-Push prompts directly from the browser to your running Claude Code session via the Channels API — no copy-paste needed.
+Push prompts directly from the browser to your running Claude Code session — no copy-paste needed.
 
 1. Add `.mcp.json` to your project root:
 ```json
@@ -68,28 +68,43 @@ Push prompts directly from the browser to your running Claude Code session via t
 }
 ```
 
-2. Start Claude Code with the channel:
-```bash
-claude --dangerously-load-development-channels server:pilot-channel
+2. Add hook config to `.claude/settings.local.json`:
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node node_modules/vite-plugin-pilot/bin/pilot-hook-channel.js"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-The "Send to Claude" button in the Alt+Click panel auto-detects whether the channel server is running.
+The "Send to Claude" button in the Alt+Click panel auto-detects whether the channel server is running. When you send a message, it will be automatically attached to your next Claude Code input.
 
 ## How It Works
 
 ```
-┌─────────────┐     file I/O      ┌──────────────┐     SSE          ┌─────────────┐
-│  AI Agent   │ ───────────────→  │  .pilot/      │ ←────────────── │  Browser    │
-│  (pilot.js) │                   │  instances/   │                  │  (client)   │
-│             │ ←───────────────  │  result.txt   │ ──────────────→ │             │
-└─────────────┘     result +      │  snapshot.txt │   compact snap   └─────────────┘
-                    snapshot        └──────────────┘
+┌─────────────┐     HTTP API      ┌──────────────┐     SSE          ┌─────────────┐
+│  AI Agent   │ ───────────────→  │  Dev Server   │ ──────────────→ │  Browser    │
+│  (pilot.js) │                   │  (middleware) │                  │  (client)   │
+│             │ ←───────────────  │               │ ←────────────── │             │
+└─────────────┘   result + snap   └──────────────┘   POST /result   └─────────────┘
+                                  │  .pilot/
+                                  │  instances/  (file channel fallback)
+                                  └──────────────┘
 ```
 
-1. Agent writes JS code to `pending.js` or sends via HTTP API
-2. Browser receives code in real-time via SSE and executes it
-3. Browser writes result to `result.txt` and compact snapshot to `compact-snapshot.txt`
-4. Agent reads result + snapshot in one tool call
+1. Agent sends JS code via HTTP API (one request, ~10-50ms response)
+2. Server dispatches code to browser via SSE (real-time, zero polling)
+3. Browser executes code and posts result back via HTTP
+4. Agent receives result + snapshot + logs in one response (fallback: file I/O)
 
 ## Playground
 
