@@ -10,7 +10,8 @@ description: 通过 vite-plugin-pilot 在浏览器中测试页面。当需要查
 ## 首次配置（仅初次安装时执行）
 
 1. 确认 vite-plugin-pilot 已安装：检查 package.json 是否包含 `vite-plugin-pilot`，如果没有则执行 `pnpm add -D vite-plugin-pilot`，并确认 vite.config.ts 的 plugins 数组中包含 `pilot()`
-2. 确认 `.pilot` 已添加到 `.gitignore`（运行时数据目录，不应提交）
+2. **语言环境检测**：分析项目语言环境，在 vite.config.ts 中配置 `pilot({ locale: 'zh' })` 或 `pilot({ locale: 'en' })`。判断依据：项目中的 UI 文本、README 语言、i18n 配置等。已有 `pilot({...})` 配置时只追加 `locale` 字段，不覆盖其他配置。默认 `zh`
+3. 确认 `.pilot` 已添加到 `.gitignore`（运行时数据目录，不应提交）
 
 ## 每次使用前检查
 
@@ -50,7 +51,7 @@ npx pilot help                    # 查看辅助函数列表
 - 显示选中元素的标签、组件名、源码位置
 - 输入框中描述你想对元素做什么
 - 点击「复制提示词」生成包含元素完整信息（标签、组件、源码、DOM路径、位置、文本、样式）的提示词
-- 点击「发送给 Claude」直接推送到当前 Claude Code session（需启动 channel server）
+- 点击「发送给 Claude」直接推送到当前 Claude Code session（需 channel server）
 - 操作后 8 秒倒计时自动关闭，输入时重置倒计时
 - 弹窗存在时选中元素的高亮保持显示
 
@@ -58,13 +59,22 @@ npx pilot help                    # 查看辅助函数列表
 
 ## Channel Server（浏览器直连 Claude Code）
 
-通过 Claude Code Channels API，浏览器中 Alt+Click 的提示词可直接推送到当前 Claude Code session。
+通过 Claude Code Channels API，浏览器中 Alt+Click 的提示词可直接推送到当前 Claude Code session（主动推送，非轮询）。
 
-**启动方式**（在另一个终端）：
-```bash
-npx pilot-channel
-# 然后用以下命令启动 Claude Code：
-claude --dangerously-load-development-channels server:pilot-channel
+**架构**：浏览器 Alt+Click → HTTP POST → pilot-channel（MCP stdio）→ Claude Code session
+
+**首次配置**（skill 自动执行）：
+1. 确认项目根目录存在 `.mcp.json`，内容如下（不存在则创建）：
+```json
+{
+  "mcpServers": {
+    "pilot-channel": {
+      "command": "node",
+      "args": ["node_modules/vite-plugin-pilot/bin/pilot-channel.js"]
+    }
+  }
+}
 ```
+2. 提示用户：使用 channel server 时需以 `claude --dangerously-load-development-channels server:pilot-channel` 启动 Claude Code。如果用户不使用 Alt+Click 推送功能，可以忽略此步骤
 
 浏览器端「发送给 Claude」按钮会在 channel server 运行时自动可用，未启动时显示「未连接」。

@@ -51,11 +51,20 @@ npm install -D vite-plugin-pilot
 
 通过 Claude Code Channels API，浏览器中 Alt+Click 的提示词可直接推送到当前 Claude Code session，无需复制粘贴。
 
-```bash
-# 终端 1：启动 channel server
-npx pilot-channel
+1. 在项目根目录添加 `.mcp.json`：
+```json
+{
+  "mcpServers": {
+    "pilot-channel": {
+      "command": "node",
+      "args": ["node_modules/vite-plugin-pilot/bin/pilot-channel.js"]
+    }
+  }
+}
+```
 
-# 终端 2：启动 Claude Code 并加载 channel
+2. 启动 Claude Code 并加载 channel：
+```bash
 claude --dangerously-load-development-channels server:pilot-channel
 ```
 

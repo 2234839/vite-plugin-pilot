@@ -56,11 +56,20 @@ follow its instructions to install vite-plugin-pilot and configure yourself, the
 
 Push prompts directly from the browser to your running Claude Code session via the Channels API — no copy-paste needed.
 
-```bash
-# Terminal 1: Start channel server
-npx pilot-channel
+1. Add `.mcp.json` to your project root:
+```json
+{
+  "mcpServers": {
+    "pilot-channel": {
+      "command": "node",
+      "args": ["node_modules/vite-plugin-pilot/bin/pilot-channel.js"]
+    }
+  }
+}
+```
 
-# Terminal 2: Start Claude Code with channel
+2. Start Claude Code with the channel:
+```bash
 claude --dangerously-load-development-channels server:pilot-channel
 ```
 
