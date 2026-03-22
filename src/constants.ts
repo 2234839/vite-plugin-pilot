@@ -31,8 +31,6 @@ export const PILOT_FILES = {
   instancesDir: 'instances',
   /** 默认实例 ID（agent 不指定 instance 时的 fallback） */
   defaultInstance: 'default',
-  /** 日志文件 */
-  logs: 'latest-errors.log',
   /** 待执行的 JS 文件 */
   pendingJs: 'pending.js',
   /** 执行结果文件 */

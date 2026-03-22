@@ -1,6 +1,6 @@
 import { appendFileSync, writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, rmSync } from 'fs'
 import { resolve, join } from 'path'
-import type { ResolvedPilotOptions, LogEntry, ExecResult, ElementInfo, SnapshotData } from '../types'
+import type { ResolvedPilotOptions, ExecResult, ElementInfo, SnapshotData } from '../types'
 import { PILOT_FILES } from '../constants'
 
 /** 实例注册信息 */
@@ -112,32 +112,6 @@ export class FileBridge {
     return best
   }
 
-  /** 追加日志到文件 */
-  appendLogs(logs: LogEntry[], instanceId: string) {
-    this.ensureInstanceDir(instanceId)
-    const formatted = this.formatLogs(logs)
-    appendFileSync(join(this.getInstanceDir(instanceId), PILOT_FILES.logs), formatted, 'utf-8')
-  }
-
-  /** 格式化日志条目 — 每条一行，便于 grep 搜索 */
-  private formatLogs(logs: LogEntry[]): string {
-    return logs.map(log => {
-      const parts = [
-        `[${log.timestamp}]`,
-        `[${log.type.toUpperCase()}]`,
-      ]
-      if (log.source) {
-        parts.push(`[${log.source}:${log.line ?? '?'}:${log.col ?? '?'}]`)
-      }
-      parts.push(log.message)
-      const line = parts.join(' ')
-      if (log.stack) {
-        return line + '\n  ' + log.stack.split('\n').join('\n  ')
-      }
-      return line
-    }).join('\n') + '\n'
-  }
-
   /** 读取并删除待执行的 JS 代码（文件驱动通道） */
   readPendingJs(instanceId: string): string | null {
     this.ensureInstanceDir(instanceId)
@@ -236,14 +210,6 @@ export class FileBridge {
     const file = join(this.getInstanceDir(instanceId), PILOT_FILES.snapshot)
     if (!existsSync(file)) return null
     return JSON.parse(readFileSync(file, 'utf-8'))
-  }
-
-  /** 读取日志文件内容 */
-  readLogs(instanceId: string): string | null {
-    const file = join(this.getInstanceDir(instanceId), PILOT_FILES.logs)
-    if (!existsSync(file)) return null
-    const content = readFileSync(file, 'utf-8')
-    return content.trim() || null
   }
 
   /** 写入执行完成标记（供 AI 轮询检测） */

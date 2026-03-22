@@ -4,16 +4,14 @@
  * 功能：
  * 1. 拦截 console.log/info/warn/error，保留原始行为
  * 2. 监听 window.onerror 和 unhandledrejection
- * 3. 缓冲日志，定时批量上报到 /__pilot/logs
+ * 3. 缓冲日志到内存数组，ws-client 在 exec 时截取新增日志附加到 result
  * 4. 维护 window.__pilot_errorCount 供 snapshot 使用
  */
 
 export const logCollectorCode = `
 (function() {
   var maxLogs = __MAX_BUFFER_SIZE__;
-  var flushInterval = __FLUSH_INTERVAL__;
   var logs = [];
-  var lastSavedIndex = 0;
   window.__pilot_errorCount = 0;
 
   function stringify(arg) {
@@ -111,21 +109,5 @@ export const logCollectorCode = `
     addLog('error', arguments);
     originals.error.apply(console, arguments);
   };
-
-  /** 定时 flush 日志到服务端 */
-  setInterval(function() {
-    if (logs.length > lastSavedIndex) {
-      var newLogs = logs.slice(lastSavedIndex);
-      if (newLogs.length > 0) {
-        fetch('/__pilot/logs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
-          body: JSON.stringify(newLogs)
-        }).then(function() {
-          lastSavedIndex = logs.length;
-        }).catch(function() {});
-      }
-    }
-  }, flushInterval);
 })();
 `

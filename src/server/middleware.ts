@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http'
-import type { ResolvedPilotOptions, LogEntry, ExecResult, ElementInfo, SnapshotData } from '../types'
+import type { ResolvedPilotOptions, ExecResult, ElementInfo, SnapshotData } from '../types'
 import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
 import { generateElementPrompt } from '../prompt/generator'
@@ -115,15 +115,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
       const endpoint = req.url.split('?')[0]
       const instanceId = getInstanceId(req)
-
-      /** ---------- POST /__pilot/logs ---------- */
-      if (endpoint === PILOT_ENDPOINTS.logs && req.method === 'POST') {
-        handlePost<LogEntry[]>(req, res, (logs) => {
-          bridge.appendLogs(logs, instanceId)
-          return { success: true }
-        })
-        return
-      }
 
       /** ---------- POST /__pilot/exec ---------- */
       if (endpoint === PILOT_ENDPOINTS.exec && req.method === 'POST') {
