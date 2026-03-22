@@ -70,8 +70,8 @@ export class FileBridge {
     return cleaned || PILOT_FILES.defaultInstance
   }
 
-  /** 确保实例目录存在 */
-  private ensureInstanceDir(instanceId: string) {
+  /** 确保实例目录存在（供 fs.watch 使用，需要目录提前存在） */
+  ensureInstanceDir(instanceId: string) {
     const dir = this.getInstanceDir(instanceId)
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true })

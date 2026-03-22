@@ -168,27 +168,27 @@ export const wsClientCode = `
     return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
   }
 
-  /** 通过 HTTP POST 发送执行结果 */
+  /** 通过 HTTP POST 发送执行结果（失败自动重试一次，确保 CLI 不超时） */
   function postResult(result) {
     fetch('/__pilot/result', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
       body: JSON.stringify(result)
-    }).catch(function() {});
+    }).catch(function() {
+      /** 后台 tab 或网络抖动导致首次失败时，200ms 后重试一次 */
+      setTimeout(function() {
+        fetch('/__pilot/result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
+          body: JSON.stringify(result)
+        }).catch(function() {});
+      }, 200);
+    });
   }
 
-  /** 发送执行结果并通知完成 */
+  /** 发送执行结果（POST /result handler 内部已调用 writeExecDone） */
   function sendResult(result) {
     postResult(result);
-    fetch('/__pilot/done', { method: 'POST', headers: pilotHeaders() }).catch(function() {});
-  }
-
-  /** 公共请求头（包含版本和实例 ID） */
-  function pilotHeaders() {
-    return {
-      'X-Pilot-Version': String(__PILOT_VERSION__),
-      'X-Pilot-Instance': __pilot_instanceId
-    };
   }
 
   /** 执行代码并发送结果的通用处理 */

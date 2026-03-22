@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http'
+import { watch as fsWatch, type FSWatcher } from 'fs'
 import type { ResolvedPilotOptions, ExecResult, ElementInfo, SnapshotData } from '../types'
 import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
@@ -37,6 +38,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
   /** SSE 连接池（按实例隔离） */
   const sseConnections: Record<string, Array<ServerResponse>> = {}
+
+  /** 实例目录的 fs.watch 监听器（每个实例一个，多 SSE 连接共享） */
+  const instanceWatchers: Record<string, FSWatcher> = {}
 
   /** 向指定实例的所有 SSE 连接广播代码 */
   function broadcastCode(instanceId: string, code: string): void {
@@ -203,23 +207,33 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         if (!sseConnections[sseInstance]) sseConnections[sseInstance] = []
         sseConnections[sseInstance].push(res)
 
-        /** 定期检查 pending.js 文件（CLI 文件通道写入的代码），
-         *  有代码时立即通过 SSE 推送给浏览器 */
-        const filePollTimer = setInterval(() => {
-          const fileCode = bridge.readPendingJs(sseInstance)
-          if (!fileCode) return
-          bridge.clearExecResult(sseInstance)
-          bridge.clearExecDone(sseInstance)
-          lastBrowserActivity[sseInstance] = Date.now()
-          broadcastCode(sseInstance, fileCode)
-        }, 1000)
+        /** 用 fs.watch 监听实例目录变化，CLI 写入 pending.js 时即时推送
+         *  替代 1s setInterval 轮询，实现零延迟 CLI → 浏览器通信 */
+        const instanceDir = bridge.getInstanceDir(sseInstance)
+        if (!instanceWatchers[sseInstance]) {
+          bridge.ensureInstanceDir(sseInstance)
+          const watcher = fsWatch(instanceDir, (eventType) => {
+            if (eventType !== 'rename' && eventType !== 'change') return
+            const fileCode = bridge.readPendingJs(sseInstance)
+            if (!fileCode) return
+            bridge.clearExecResult(sseInstance)
+            bridge.clearExecDone(sseInstance)
+            lastBrowserActivity[sseInstance] = Date.now()
+            broadcastCode(sseInstance, fileCode)
+          })
+          instanceWatchers[sseInstance] = watcher
+        }
 
         req.on('close', () => {
-          clearInterval(filePollTimer)
           const conns = sseConnections[sseInstance]
           if (conns) {
             const idx = conns.indexOf(res)
             if (idx !== -1) conns.splice(idx, 1)
+          }
+          /** 最后一个 SSE 连接断开时关闭 watcher，避免资源泄漏 */
+          if (conns && conns.length === 0 && instanceWatchers[sseInstance]) {
+            instanceWatchers[sseInstance].close()
+            delete instanceWatchers[sseInstance]
           }
         })
         return
