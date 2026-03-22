@@ -15,7 +15,7 @@ export function buildInjectScript(options: ResolvedPilotOptions, pilotVersion?: 
     { name: 'Log Collector', code: logCollectorCode },
     { name: 'SSE Client', code: wsClientCode },
     { name: 'Page Snapshot', code: snapshotCode },
-    { name: 'Element Inspector', code: elementInspectorCode },
+    ...(options.inspector ? [{ name: 'Element Inspector', code: elementInspectorCode }] : []),
   ]
 
   /** 替换占位符 */

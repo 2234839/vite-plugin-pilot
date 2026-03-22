@@ -1,6 +1,6 @@
 import { appendFileSync, writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, rmSync } from 'fs'
 import { resolve, join } from 'path'
-import type { ResolvedPilotOptions, ExecResult, ElementInfo, SnapshotData } from '../types'
+import type { ResolvedPilotOptions, ExecResult, ElementInfo } from '../types'
 import { PILOT_FILES } from '../constants'
 
 /** 实例注册信息 */
@@ -90,11 +90,35 @@ export class FileBridge {
     }
   }
 
-  /** 注册/更新实例信息（每次 /check 请求时调用） */
+  /** 注册/更新实例信息（每次 SSE 连接时调用），同时清理过期实例 */
   writeActiveInstance(instanceId: string, urlPath: string) {
     const map = this.readActiveInstance()
     const label = FileBridge.toInstanceId(urlPath)
     map[instanceId] = { path: urlPath, label, lastSeen: Date.now() }
+
+    /** 清理超过 5 分钟未活跃的实例目录 */
+    const staleThreshold = Date.now() - 5 * 60 * 1000
+    const staleIds: string[] = []
+    for (const [id, info] of Object.entries(map)) {
+      if (info.lastSeen < staleThreshold) {
+        staleIds.push(id)
+        const dir = this.getInstanceDir(id)
+        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+        delete map[id]
+      }
+    }
+
+    /** 实例数量上限 20，超出时清理最旧的 */
+    const entries = Object.entries(map)
+    if (entries.length > 20) {
+      entries.sort((a, b) => a[1].lastSeen - b[1].lastSeen)
+      for (const [id] of entries.slice(0, entries.length - 20)) {
+        const dir = this.getInstanceDir(id)
+        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+        delete map[id]
+      }
+    }
+
     writeFileSync(resolve(this.pilotDir, PILOT_FILES.activeInstance), JSON.stringify(map, null, 2), 'utf-8')
   }
 
@@ -197,13 +221,6 @@ export class FileBridge {
     if (!existsSync(file)) return null
     const content = readFileSync(file, 'utf-8')
     return content.trim() || null
-  }
-
-  /** 读取页面快照 */
-  readSnapshot(instanceId: string): SnapshotData | null {
-    const file = join(this.getInstanceDir(instanceId), PILOT_FILES.snapshot)
-    if (!existsSync(file)) return null
-    return JSON.parse(readFileSync(file, 'utf-8'))
   }
 
   /** 写入执行完成标记（供 AI 轮询检测） */

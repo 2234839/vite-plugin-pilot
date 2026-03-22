@@ -13,12 +13,13 @@ English | **[简体中文](./README_zh.md)**
 - **多实例** — 每个浏览器 tab 独立追踪，通过 `PILOT_INSTANCE` 自由切换
 - **自动刷新** — Dev server 重启后浏览器自动刷新
 - **Vue/React 兼容** — `typeByPlaceholder` 触发 input 事件，兼容 v-model
+- **Element Inspector** — Alt+Click 选中元素，生成含完整信息的提示词，供 AI Agent 使用
 
 ## 为什么不直接用 Chrome DevTools MCP？
 
 | | vite-plugin-pilot | Chrome DevTools MCP |
 |---|---|---|
-| **连接方式** | Dev server 注入（HTTP 轮询） | Chrome DevTools Protocol (CDP) |
+| **连接方式** | Dev server 注入（SSE + 文件 I/O） | Chrome DevTools Protocol (CDP) |
 | **需要 CDP 端口** | 不需要 | 需要（`--remote-debugging-port`） |
 | **WPS 加载项** | 支持 | 不支持（无法访问 CDP） |
 | **Electron / 嵌入式浏览器** | 支持 | 不确定（需开启 CDP） |
@@ -48,15 +49,15 @@ npm install -D vite-plugin-pilot
 ## 工作原理
 
 ```
-┌─────────────┐     文件 I/O      ┌──────────────┐     轮询        ┌─────────────┐
+┌─────────────┐     文件 I/O      ┌──────────────┐     SSE          ┌─────────────┐
 │  AI Agent   │ ───────────────→  │  .pilot/      │ ←────────────── │  浏览器      │
 │  (pilot.js) │                   │  instances/   │                  │  (客户端)    │
 │             │ ←───────────────  │  result.txt   │ ──────────────→ │             │
 └─────────────┘     结果 + 快照    └──────────────┘   紧凑快照       └─────────────┘
 ```
 
-1. Agent 将 JS 代码写入 `pending.js`
-2. 浏览器轮询 `/__pilot/check`，获取代码并执行
+1. Agent 将 JS 代码写入 `pending.js` 或通过 HTTP API 发送
+2. 浏览器通过 SSE 实时接收代码并执行
 3. 浏览器将结果写入 `result.txt`，紧凑快照写入 `compact-snapshot.txt`
 4. Agent 一次 tool call 读取结果 + 快照
 

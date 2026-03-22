@@ -23,6 +23,7 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
       flushInterval: userOptions.flushInterval ?? DEFAULT_OPTIONS.flushInterval,
       execTimeout: userOptions.execTimeout ?? DEFAULT_OPTIONS.execTimeout,
       maxResultSize: userOptions.maxResultSize ?? DEFAULT_OPTIONS.maxResultSize,
+      inspector: userOptions.inspector ?? DEFAULT_OPTIONS.inspector,
       pilotDir: resolve(cwd, PILOT_FILES.dir),
     }
   }

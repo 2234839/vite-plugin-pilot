@@ -43,3 +43,14 @@ npx pilot help                    # 查看辅助函数列表
 - 多步操作间 `await __pilot_wait(0)` 让 Vue scheduler 处理响应式更新
 - **始终用 `typeByPlaceholder`**：Vue/React v-model 需要 input 事件
 - `npx pilot page cached` 读缓存（0.03s），不需要最新状态时用
+
+## Element Inspector（Alt+Click）
+
+默认开启。按住 Alt 键移动鼠标可高亮页面元素，Alt+Click 选中元素后弹出提示词面板：
+- 显示选中元素的标签、组件名、源码位置
+- 输入框中描述你想对元素做什么
+- 点击「复制提示词」生成包含元素完整信息（标签、组件、源码、DOM路径、位置、文本、样式）的提示词
+- 复制后 8 秒倒计时自动关闭，输入时重置倒计时
+- 弹窗存在时选中元素的高亮保持显示
+
+**关闭 Element Inspector**：在 vite.config.ts 中设置 `pilot({ inspector: false })`

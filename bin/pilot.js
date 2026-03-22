@@ -12,8 +12,8 @@
  *   npx pilot status               连接状态诊断
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync, mkdirSync } from 'fs'
-import { resolve, join } from 'path'
+import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync, mkdirSync, watch as fsWatch } from 'fs'
+import { dirname, join, resolve } from 'path'
 
 const PILOT_FILES = {
   dir: '.pilot',
@@ -53,24 +53,73 @@ function getInstanceDir(pilotDir, instanceId) {
 }
 
 /**
- * 轮询等待文件出现（最多 waitMs 毫秒）
+ * 通过 fs.watch 事件驱动等待文件出现（即时响应，零轮询）
+ * fs.watch 不可用时 fallback 到 100ms 轮询
  */
 function waitForFile(filePath, waitMs = 30000) {
-  const start = Date.now()
-  const interval = 100
   return new Promise((resolve) => {
-    function check() {
-      if (existsSync(filePath)) {
-        resolve(true)
-        return
-      }
-      if (Date.now() - start >= waitMs) {
-        resolve(false)
-        return
-      }
-      setTimeout(check, interval)
+    const parentDir = dirname(filePath)
+
+    /** 确保 parent 目录存在 */
+    if (!existsSync(parentDir)) {
+      resolve(false)
+      return
     }
-    check()
+
+    /** 文件可能在我们设置 watch 之前就已存在 */
+    if (existsSync(filePath)) {
+      resolve(true)
+      return
+    }
+
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        watcher?.close()
+        resolve(false)
+      }
+    }, waitMs)
+
+    let watcher
+    try {
+      watcher = fsWatch(parentDir, (eventType, filename) => {
+        if (settled) return
+        if (!filename || filename !== filePath.split('/').pop()) return
+        if (existsSync(filePath)) {
+          settled = true
+          clearTimeout(timeout)
+          watcher.close()
+          resolve(true)
+        }
+      })
+      watcher.on('error', () => {
+        if (settled) return
+        watcher.close()
+        fallbackPoll()
+      })
+    } catch {
+      fallbackPoll()
+    }
+
+    /** fs.watch 不可用时 fallback 到 100ms 轮询 */
+    function fallbackPoll() {
+      if (settled) return
+      const start = Date.now()
+      const poll = setInterval(() => {
+        if (settled) { clearInterval(poll); return }
+        if (existsSync(filePath)) {
+          settled = true
+          clearTimeout(timeout)
+          clearInterval(poll)
+          resolve(true)
+        } else if (Date.now() - start >= waitMs) {
+          settled = true
+          clearInterval(poll)
+          resolve(false)
+        }
+      }, 100)
+    }
   })
 }
 
@@ -155,19 +204,30 @@ async function main() {
 
   /** 解析 instance ID：default 自动选最近活跃的实例，否则用指定的 UUID */
   let instanceId = process.env.PILOT_INSTANCE
+  const activeFile = join(pilotDir, 'active-instance.json')
+  const activeData = readJsonSafe(activeFile) || {}
   if (!instanceId || instanceId === 'default') {
-    const activeFile = join(pilotDir, 'active-instance.json')
-    const activeData = readJsonSafe(activeFile)
-    if (activeData) {
-      let bestTime = 0
-      for (const [id, info] of Object.entries(activeData)) {
-        if (info.lastSeen > bestTime) {
-          instanceId = id
-          bestTime = info.lastSeen
-        }
+    let bestTime = 0
+    for (const [id, info] of Object.entries(activeData)) {
+      if (info.lastSeen > bestTime) {
+        instanceId = id
+        bestTime = info.lastSeen
       }
     }
     instanceId = instanceId || 'default'
+  }
+
+  /** 检查实例是否活跃（30 秒内有连接），不活跃时提示可用实例列表 */
+  const instanceInfo = activeData[instanceId]
+  const recentThreshold = Date.now() - 30 * 1000
+  if (!instanceInfo || instanceInfo.lastSeen < recentThreshold) {
+    const available = Object.entries(activeData)
+      .filter(([, info]) => info.lastSeen >= recentThreshold)
+      .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
+      .map(([id, info]) => `  ${id.slice(0, 8)} (${info.label})`)
+    if (available.length > 0) {
+      console.error(`WARNING: 实例 ${instanceId.slice(0, 8)} 不活跃，可用实例:\n${available.join('\n')}\n提示: PILOT_INSTANCE=xxxxxxxx node bin/pilot.js ${command}`)
+    }
   }
 
   switch (command) {

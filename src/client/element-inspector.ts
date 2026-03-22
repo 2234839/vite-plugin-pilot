@@ -2,10 +2,10 @@
  * 元素选择器客户端代码（字符串形式，用于注入到浏览器）
  *
  * 功能：
- * 1. Alt+Click 激活选择模式
- * 2. 鼠标移动时高亮目标元素，显示覆盖层
- * 3. 覆盖层显示：组件名、文件路径:行号、元素尺寸
- * 4. 点击确认选中，收集元素信息并 POST 到 /__pilot/inspect
+ * 1. 按住 Alt 键激活选择模式，鼠标移动时高亮目标元素（组件名、源码位置、尺寸）
+ * 2. Alt+Click 选中元素，弹出入框+复制按钮面板
+ * 3. 用户输入描述后一键复制提示词（含元素标签、组件、源码、DOM路径、位置、文本、样式）
+ * 4. 复制后 8 秒倒计时自动关闭，用户输入可重置倒计时
  */
 
 export const elementInspectorCode = `
@@ -179,13 +179,156 @@ export const elementInspectorCode = `
     e.stopPropagation();
 
     var info = collectElementInfo(currentTarget);
-    hideHighlight();
+    /** 弹窗存在时保持元素高亮，方便用户对照 */
+    active = false;
+    document.body.style.cursor = '';
 
-    fetch('/__pilot/inspect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
-      body: JSON.stringify(info)
-    }).catch(function() {});
+    showPromptPanel(info);
+  }
+
+  /** 显示提示词面板：用户输入描述后可复制完整提示词给 agent */
+  function showPromptPanel(info) {
+    /** 移除已有面板和倒计时 */
+    var old = document.getElementById('__pilot-prompt-panel');
+    if (old) old.remove();
+    if (showPromptPanel._timer) clearTimeout(showPromptPanel._timer);
+
+    var panel = document.createElement('div');
+    panel.id = '__pilot-prompt-panel';
+    panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483645;background:rgba(15,23,42,0.95);color:#e2e8f0;border-radius:12px;padding:20px;min-width:420px;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid rgba(59,130,246,0.3);font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;';
+
+    /** 元素信息摘要 */
+    var sourceInfo = info.sourceFile
+      ? info.sourceFile + (info.sourceLine ? ':' + info.sourceLine : '')
+      : info.domPath;
+    var compInfo = info.componentName
+      ? '  [' + info.componentName + ']'
+      : '';
+
+    panel.innerHTML =
+      '<div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">选中元素: <span style="color:#60a5fa">' +
+        info.tagName + compInfo + '</span> <span style="color:#475569">' + sourceInfo + '</span></div>' +
+      '<div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">文本: <span style="color:#cbd5e1">' +
+        (info.textContent || '(空)').slice(0, 100) + '</span></div>' +
+      '<textarea id="__pilot-prompt-input" placeholder="描述你想对这个元素做什么（如：把这个按钮改成蓝色、修改这段文字的内容...）" style="width:100%;height:72px;background:rgba(30,41,59,0.8);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:10px;color:#e2e8f0;font-size:13px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box;"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">' +
+        '<span id="__pilot-prompt-timer" style="font-size:12px;color:#64748b;line-height:28px;margin-right:auto;"></span>' +
+        '<button id="__pilot-prompt-copy" style="padding:6px 16px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">复制提示词</button>' +
+        '<button id="__pilot-prompt-close" style="padding:6px 16px;background:rgba(51,65,85,0.8);color:#94a3b8;border:none;border-radius:6px;cursor:pointer;font-size:13px;">关闭</button>' +
+      '</div>';
+
+    document.body.appendChild(panel);
+
+    /** 聚焦输入框 */
+    var textarea = document.getElementById('__pilot-prompt-input');
+    var timerSpan = document.getElementById('__pilot-prompt-timer');
+    setTimeout(function() { textarea.focus(); }, 50);
+
+    /** 倒计时自动关闭（默认 8 秒，用户交互时重置） */
+    var countdown = 8;
+    var autoCloseTimer = null;
+
+    function resetAutoClose() {
+      countdown = 8;
+      if (autoCloseTimer) clearInterval(autoCloseTimer);
+      timerSpan.textContent = '';
+      autoCloseTimer = setInterval(function() {
+        countdown--;
+        timerSpan.textContent = countdown + 's 后关闭';
+        if (countdown <= 0) {
+          clearInterval(autoCloseTimer);
+          autoCloseTimer = null;
+          panel.remove();
+        }
+      }, 1000);
+    }
+
+    /** 复制后启动倒计时 */
+    function startAutoClose() {
+      countdown = 8;
+      if (autoCloseTimer) clearInterval(autoCloseTimer);
+      timerSpan.textContent = '';
+      autoCloseTimer = setInterval(function() {
+        countdown--;
+        timerSpan.textContent = countdown + 's 后关闭';
+        if (countdown <= 0) {
+          clearInterval(autoCloseTimer);
+          autoCloseTimer = null;
+          panel.remove();
+        }
+      }, 1000);
+    }
+
+    /** 用户在输入框中输入时重置倒计时 */
+    textarea.addEventListener('input', function() {
+      if (autoCloseTimer) {
+        countdown = 8;
+        timerSpan.textContent = '';
+      }
+    });
+
+    /** 生成提示词文本 */
+    function getPromptText() {
+      var userDesc = textarea.value.trim();
+      var parts = [];
+      if (userDesc) parts.push(userDesc);
+      parts.push('');
+      parts.push('--- 选中元素信息 ---');
+      parts.push('标签: ' + info.tagName + (info.className ? '.' + info.className.split(/\\s+/).slice(0, 3).join('.') : ''));
+      if (info.componentName) parts.push('组件: ' + info.componentName);
+      if (info.sourceFile) parts.push('源码: ' + info.sourceFile + (info.sourceLine ? ':' + info.sourceLine : ''));
+      parts.push('DOM路径: ' + info.domPath);
+      parts.push('位置: ' + info.rect.top + ', ' + info.rect.left + ' (' + info.rect.width + '×' + info.rect.height + ')');
+      var text = info.textContent || '';
+      if (text) parts.push('文本: ' + text.slice(0, 200));
+      if (info.computedStyles) parts.push('样式: color=' + info.computedStyles.color + ' font-size=' + info.computedStyles.fontSize);
+      return parts.join('\\n');
+    }
+
+    /** 复制按钮 */
+    document.getElementById('__pilot-prompt-copy').onclick = function() {
+      var text = getPromptText();
+      navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById('__pilot-prompt-copy');
+        btn.textContent = '已复制!';
+        btn.style.background = '#22c55e';
+        startAutoClose();
+        setTimeout(function() { btn.textContent = '复制提示词'; btn.style.background = '#3b82f6'; }, 1500);
+      }).catch(function() {
+        /** fallback: 选中 textarea 内容 */
+        var fullPrompt = getPromptText();
+        textarea.value = fullPrompt;
+        textarea.select();
+      });
+    };
+
+    /** 关闭面板时清理高亮 */
+    function closePanel() {
+      if (autoCloseTimer) clearInterval(autoCloseTimer);
+      hideHighlight();
+      panel.remove();
+    }
+
+    /** 关闭按钮 */
+    document.getElementById('__pilot-prompt-close').onclick = closePanel;
+
+    /** ESC 关闭 */
+    function onEsc(e) {
+      if (e.key === 'Escape') {
+        closePanel();
+        document.removeEventListener('keydown', onEsc);
+      }
+    }
+    document.addEventListener('keydown', onEsc);
+
+    /** 点击面板外关闭 */
+    function onOutsideClick(e) {
+      if (!panel.contains(e.target)) {
+        closePanel();
+        document.removeEventListener('mousedown', onOutsideClick);
+      }
+    }
+    setTimeout(function() { document.addEventListener('mousedown', onOutsideClick); }, 100);
   }
 
   document.addEventListener('keydown', onAltKeyDown);

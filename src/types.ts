@@ -10,6 +10,8 @@ export interface PilotOptions {
   execTimeout?: number
   /** 执行结果最大字节数，默认 100KB */
   maxResultSize?: number
+  /** Alt+Click 元素检查器，默认开启。设为 false 禁用 */
+  inspector?: boolean
 }
 
 export type LogLevel = 'info' | 'warn' | 'error'

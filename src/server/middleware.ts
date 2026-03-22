@@ -48,15 +48,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     }
   }
 
-  /** 向指定实例的所有 SSE 连接发送 reload 指令 */
-  function broadcastReload(instanceId: string): void {
-    const connections = sseConnections[instanceId]
-    if (!connections || connections.length === 0) return
-    for (const res of connections) {
-      res.write(`event: reload\ndata: 1\n\n`)
-    }
-  }
-
   /** 通过 SSE 广播代码给浏览器（清除旧结果，更新活跃时间） */
   function dispatchCode(instanceId: string, code: string): void {
     bridge.clearExecResult(instanceId)
@@ -64,9 +55,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     lastBrowserActivity[instanceId] = Date.now()
     broadcastCode(instanceId, code)
   }
-
-  /** HTTP API 代码分发队列（POST /exec、GET /run 推送的代码暂存于此） */
-  const pendingCodeQueues: Record<string, string[]> = {}
 
   /** 每个实例最后的浏览器活动时间戳 */
   const lastBrowserActivity: Record<string, number> = {}
@@ -118,9 +106,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           bridge.clearExecResult(instanceId)
           bridge.clearExecDone(instanceId)
 
-          if (!pendingCodeQueues[instanceId]) pendingCodeQueues[instanceId] = []
-          pendingCodeQueues[instanceId].push(code)
-
           /** 通过 SSE 广播给浏览器 */
           dispatchCode(instanceId, code)
 
@@ -132,7 +117,10 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
               return
             }
             /** 同步等待模式：等待客户端执行并返回结果 */
-            waitForResult(instanceId, res, withSnapshot, compactSnapshot)
+            enqueueWaiter(instanceId, res, { type: 'default', withSnapshot, compact: compactSnapshot }, 70_000, () => {
+              res.writeHead(504, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'Execution timeout', success: false }))
+            })
           } else {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true }))
@@ -149,14 +137,16 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
         lastBrowserActivity[sseInstance] = Date.now()
 
-        /** 注册实例信息 */
+        /** 注册实例信息（referer 可能因代理环境丢失，fallback 用默认路径） */
         const referer = req.headers.referer
+        let urlPath = '/'
         if (referer) {
           try {
             const urlObj = new URL(referer)
-            bridge.writeActiveInstance(sseInstance, urlObj.pathname)
+            urlPath = urlObj.pathname
           } catch { /* ignore */ }
         }
+        bridge.writeActiveInstance(sseInstance, urlPath)
 
         /** 版本不匹配时立即返回 reload 指令然后关闭连接 */
         if (clientVersion && pilotVersion && clientVersion !== pilotVersion) {
@@ -268,7 +258,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           bridge.writeExecResult(result, instanceId)
           bridge.writeResultTxt(result, instanceId)
           bridge.writeExecDone(instanceId)
-          /** 通知队首等待者（FIFO 匹配 pendingCodeQueue） */
+          /** 通知队首等待者 */
           const waiters = execWaiters[instanceId]
           if (waiters && waiters.length > 0) {
             const waiter = waiters.shift()!
@@ -390,9 +380,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       /** ---------- GET /__pilot/snapshot (Agent 读取) ---------- */
       if (endpoint === PILOT_ENDPOINTS.snapshot && req.method === 'GET') {
         /**
-         * 直接读取文件缓存（客户端每 5s 自动上报）
-         * ?fresh=1 时通过 exec 通道请求实时采集，超时后降级读文件
-         * ?compact=1 时过滤只保留交互元素和 section 标题，节省 ~40% token
+         * ?fresh=1 时通过 exec 通道请求实时采集，超时后降级读 compact-snapshot.txt
+         * non-fresh 直接读 compact-snapshot.txt 缓存
          */
         const url = new URL(req.url, 'http://localhost')
         const fresh = url.searchParams.get('fresh') !== null
@@ -400,11 +389,12 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
         if (fresh) {
           const snapshotCode = 'JSON.stringify(window.__pilot_snapshot && window.__pilot_snapshot())'
-          if (!pendingCodeQueues[instanceId]) pendingCodeQueues[instanceId] = []
-          pendingCodeQueues[instanceId].push(snapshotCode)
-          waitForExecSnapshot(instanceId, res, compact)
+          dispatchCode(instanceId, snapshotCode)
+          enqueueWaiter(instanceId, res, { type: 'snapshot', compact }, 5000, () => {
+            respondWithCachedSnapshot(instanceId, res)
+          })
         } else {
-          respondWithCachedSnapshot(instanceId, res, compact)
+          respondWithCachedSnapshot(instanceId, res)
         }
         return
       }
@@ -439,9 +429,10 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
         if (fresh) {
           const snapshotCode = 'JSON.stringify(window.__pilot_snapshot && window.__pilot_snapshot())'
-          if (!pendingCodeQueues[pageInstance]) pendingCodeQueues[pageInstance] = []
-          pendingCodeQueues[pageInstance].push(snapshotCode)
-          waitForPageResult(pageInstance, res)
+          dispatchCode(pageInstance, snapshotCode)
+          enqueueWaiter(pageInstance, res, { type: 'page' }, 5000, () => {
+            respondWithCachedSnapshot(pageInstance, res)
+          })
         } else {
           const text = bridge.readCompactSnapshot(pageInstance)
           if (text) {
@@ -484,14 +475,14 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         bridge.clearExecResult(runInstance)
         bridge.clearExecDone(runInstance)
 
-        if (!pendingCodeQueues[runInstance]) pendingCodeQueues[runInstance] = []
-        pendingCodeQueues[runInstance].push(code)
-
         /** 通过 SSE 广播给浏览器 */
         dispatchCode(runInstance, code)
 
         /** 同步等待结果，超时后返回 TIMEOUT */
-        waitForRunResult(runInstance, res, withPage, withLogs)
+        enqueueWaiter(runInstance, res, { type: 'run', withPage, withLogs }, 70_000, () => {
+          res.writeHead(504, { 'Content-Type': 'text/plain' })
+          res.end('TIMEOUT')
+        })
         return
       }
 
@@ -499,8 +490,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       if (endpoint === '/__pilot/status' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
-          pendingCode: (pendingCodeQueues[instanceId]?.length ?? 0) > 0,
-          snapshot: !!bridge.readSnapshot(instanceId),
+          pendingCode: (execWaiters[instanceId]?.length ?? 0) > 0,
+          snapshot: !!bridge.readCompactSnapshot(instanceId),
           lastActivity: lastBrowserActivity[instanceId],
           serverUptime: Date.now() - serverStartedAt,
           instances: bridge.listInstances(),
@@ -514,122 +505,39 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   }
 
   /**
-   * 同步等待执行结果
-   * 超时后返回 504，AI 可根据错误信息决定下一步
+   * 通用等待函数：注册到 execWaiters 队列，超时后自动清理并发送响应
+   * 所有 waitFor* 函数的统一实现，通过 opts 控制超时行为和响应格式
    */
-  function waitForResult(instanceId: string, res: ServerResponse, withSnapshot?: boolean, compact?: boolean): void {
-    /** 服务端等待超时 70s，覆盖浏览器后台 tab 轮询限流（~60s） */
-    const timeout = 70_000
-
-    if (!execWaiters[instanceId]) execWaiters[instanceId] = []
-
-    const timer = setTimeout(() => {
-      /** 超时：从队列中移除该等待者并返回 504 */
-      const idx = execWaiters[instanceId].findIndex(w => w.res === res)
-      if (idx !== -1) execWaiters[instanceId].splice(idx, 1)
-      res.writeHead(504, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Execution timeout', success: false }))
-    }, timeout)
-
-    execWaiters[instanceId].push({ res, timer })
-    waiterOptions.set(res, { type: 'default', withSnapshot, compact })
-  }
-
-  /**
-   * 同步等待执行结果（纯文本模式，供 GET /__pilot/run 使用）
-   * 成功返回 result 值，失败返回 ERROR: xxx，超时返回 TIMEOUT
-   * withPage=true 时附带 compact snapshot（用 --- 分隔）
-   * withLogs=true 时成功也附带控制台日志
-   */
-  function waitForRunResult(instanceId: string, res: ServerResponse, withPage?: boolean, withLogs?: boolean): void {
-    const timeout = 70_000
-
+  function enqueueWaiter(
+    instanceId: string,
+    res: ServerResponse,
+    opts: WaiterOptions,
+    timeout: number,
+    onTimeout: () => void,
+  ): void {
     if (!execWaiters[instanceId]) execWaiters[instanceId] = []
 
     const timer = setTimeout(() => {
       const idx = execWaiters[instanceId].findIndex(w => w.res === res)
       if (idx !== -1) execWaiters[instanceId].splice(idx, 1)
-      res.writeHead(504, { 'Content-Type': 'text/plain' })
-      res.end('TIMEOUT')
-    }, timeout)
-
-    /** 标记为 run 模式，POST /result handler 会返回纯文本 */
-    execWaiters[instanceId].push({ res, timer })
-    waiterOptions.set(res, { type: 'run', withPage, withLogs })
-  }
-
-  /**
-   * 等待 fresh snapshot 结果（纯文本模式，供 GET /__pilot/page?fresh=1 使用）
-   * 超时后降级读文件缓存
-   */
-  function waitForPageResult(instanceId: string, res: ServerResponse): void {
-    const timeout = 5000
-    let resolved = false
-
-    if (!execWaiters[instanceId]) execWaiters[instanceId] = []
-
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        const idx = execWaiters[instanceId].findIndex(w => w.res === res)
-        if (idx !== -1) execWaiters[instanceId].splice(idx, 1)
-        const text = bridge.readCompactSnapshot(instanceId)
-        if (text) {
-          res.writeHead(200, { 'Content-Type': 'text/plain' })
-          res.end(text)
-        } else {
-          res.writeHead(504, { 'Content-Type': 'text/plain' })
-          res.end('NO_SNAPSHOT')
-        }
-      }
+      onTimeout()
     }, timeout)
 
     execWaiters[instanceId].push({ res, timer })
-    waiterOptions.set(res, { type: 'page' })
+    waiterOptions.set(res, opts)
   }
 
   /**
-   * 通过 exec 轮询通道等待快照结果
-   * 客户端执行 JSON.stringify(window.__pilot_snapshot()) 后结果通过 POST /result 回传
+   * 降级：读取 compact-snapshot.txt 缓存
    */
-  function waitForExecSnapshot(instanceId: string, res: ServerResponse, compact?: boolean): void {
-    const timeout = 5000
-    let resolved = false
-
-    if (!execWaiters[instanceId]) execWaiters[instanceId] = []
-
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        const idx = execWaiters[instanceId].findIndex(w => w.res === res)
-        if (idx !== -1) execWaiters[instanceId].splice(idx, 1)
-        respondWithCachedSnapshot(instanceId, res, compact)
-      }
-    }, timeout)
-
-    /** 注册到等待者队列，result POST 时会按 FIFO 通知 */
-    execWaiters[instanceId].push({ res, timer })
-    waiterOptions.set(res, { type: 'snapshot', compact })
-  }
-
-  /**
-   * 降级：读取文件缓存的快照
-   */
-  function respondWithCachedSnapshot(instanceId: string, res: ServerResponse, compact?: boolean) {
-    const cached = bridge.readSnapshot(instanceId)
+  function respondWithCachedSnapshot(instanceId: string, res: ServerResponse): void {
+    const cached = bridge.readCompactSnapshot(instanceId)
     if (cached) {
-      if (compact) {
-        const { meta, text, fullText } = getCompactText(cached as unknown as Record<string, unknown>)
-        bridge.writeCompactSnapshot(fullText, instanceId)
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ...meta, text }))
-      } else {
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify(cached))
-      }
+      res.writeHead(200, { 'Content-Type': 'text/plain' })
+      res.end(cached)
     } else {
-      res.writeHead(504, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Snapshot timeout. Ensure browser page is open.' }))
+      res.writeHead(504, { 'Content-Type': 'text/plain' })
+      res.end('NO_SNAPSHOT')
     }
   }
 }

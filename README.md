@@ -18,12 +18,13 @@ A Vite plugin that lets AI agents (Claude Code, Cursor, etc.) **see, interact wi
 - **Multi-Instance** — Each browser tab is independently tracked, switch freely with `PILOT_INSTANCE`
 - **Auto Reload** — Browser auto-refreshes when dev server restarts
 - **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
+- **Element Inspector** — Alt+Click any element to generate a prompt with full context for AI agents
 
 ## Why Not Chrome DevTools MCP?
 
 | | vite-plugin-pilot | Chrome DevTools MCP |
 |---|---|---|
-| **Connects via** | Dev server injection (HTTP polling) | Chrome DevTools Protocol (CDP) |
+| **Connects via** | Dev server injection (SSE + file I/O) | Chrome DevTools Protocol (CDP) |
 | **Requires CDP port** | No | Yes (`--remote-debugging-port`) |
 | **WPS Add-ins** | Yes | No (no CDP access) |
 | **Electron / embedded browsers** | Yes | Maybe (needs CDP enabled) |
@@ -53,7 +54,7 @@ follow its instructions to install vite-plugin-pilot and configure yourself, the
 ## How It Works
 
 ```
-┌─────────────┐     file I/O      ┌──────────────┐     polling      ┌─────────────┐
+┌─────────────┐     file I/O      ┌──────────────┐     SSE          ┌─────────────┐
 │  AI Agent   │ ───────────────→  │  .pilot/      │ ←────────────── │  Browser    │
 │  (pilot.js) │                   │  instances/   │                  │  (client)   │
 │             │ ←───────────────  │  result.txt   │ ──────────────→ │             │
@@ -61,8 +62,8 @@ follow its instructions to install vite-plugin-pilot and configure yourself, the
                     snapshot        └──────────────┘
 ```
 
-1. Agent writes JS code to `pending.js`
-2. Browser polls `/__pilot/check`, picks up code, executes it
+1. Agent writes JS code to `pending.js` or sends via HTTP API
+2. Browser receives code in real-time via SSE and executes it
 3. Browser writes result to `result.txt` and compact snapshot to `compact-snapshot.txt`
 4. Agent reads result + snapshot in one tool call
 

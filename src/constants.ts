@@ -33,8 +33,6 @@ export const PILOT_FILES = {
   execResult: 'exec-result.json',
   /** 选中元素信息文件 */
   selectedElement: 'selected-element.json',
-  /** 页面快照文件 */
-  snapshot: 'snapshot.json',
   /** compact 格式快照文件（AI 直接 cat 读取，无需 curl） */
   compactSnapshot: 'compact-snapshot.txt',
   /** 最近一次 exec 产生的控制台日志（grep-friendly 纯文本格式） */
@@ -56,4 +54,6 @@ export const DEFAULT_OPTIONS = {
   flushInterval: 1000,
   execTimeout: 15000,
   maxResultSize: 100 * 1024,
+  /** Alt+Click 元素检查器，默认开启 */
+  inspector: true,
 } as const
