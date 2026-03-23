@@ -373,7 +373,8 @@ export function buildUserscript(options: ResolvedPilotOptions, pilotVersion: str
   /** dev server 地址，按需修改 */
   var SERVER_ORIGIN = "${serverOrigin}";
   window.__PILOT_SERVER_ORIGIN__ = SERVER_ORIGIN;
-  window.__pilot_instanceId = "userscript:" + Math.random().toString(16).slice(2, 10);
+  window.__pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || ("userscript:" + Math.random().toString(16).slice(2, 10));
+  sessionStorage.setItem('__pilot_instanceId', window.__pilot_instanceId);
   var __PILOT_VERSION__ = "${pilotVersion}";
   /** ==================== 配置结束 ==================== */
 

@@ -68,7 +68,8 @@ export function buildBridgeScript(options: ResolvedPilotOptions, pilotVersion: s
   window.__PILOT_SERVER_ORIGIN__ = "${serverOrigin}";
   /** console: 前缀的 instance ID，与 Vite 注入的 tab 区分 */
   var __PILOT_VERSION__ = "${pilotVersion}";
-  window.__pilot_instanceId = "console:" + Math.random().toString(16).slice(2, 10);
+  window.__pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || ("console:" + Math.random().toString(16).slice(2, 10));
+  sessionStorage.setItem('__pilot_instanceId', window.__pilot_instanceId);
 
   console.log("[Pilot] Console Bridge starting... (instance: " + window.__pilot_instanceId + ")");
   console.log("[Pilot] Connecting to " + window.__PILOT_SERVER_ORIGIN__);
