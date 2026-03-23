@@ -96,23 +96,10 @@ export class FileBridge {
     const label = FileBridge.toInstanceId(urlPath)
     map[instanceId] = { path: urlPath, label, lastSeen: Date.now() }
 
-    /** 清理超过 5 分钟未活跃的实例目录 */
+    /** 清理超过 5 分钟未活跃的实例目录（保留活跃实例，不限制数量） */
     const staleThreshold = Date.now() - 5 * 60 * 1000
-    const staleIds: string[] = []
     for (const [id, info] of Object.entries(map)) {
       if (info.lastSeen < staleThreshold) {
-        staleIds.push(id)
-        const dir = this.getInstanceDir(id)
-        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
-        delete map[id]
-      }
-    }
-
-    /** 实例数量上限 20，超出时清理最旧的 */
-    const entries = Object.entries(map)
-    if (entries.length > 20) {
-      entries.sort((a, b) => a[1].lastSeen - b[1].lastSeen)
-      for (const [id] of entries.slice(0, entries.length - 20)) {
         const dir = this.getInstanceDir(id)
         if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
         delete map[id]

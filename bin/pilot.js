@@ -18,7 +18,13 @@
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync, mkdirSync, watch as fsWatch } from 'fs'
 import { dirname, join, resolve } from 'path'
+import { createRequire } from 'module'
+
+/** 通过 require 读取 package.json 中的版本号（npm 安装后路径可靠） */
+const require = createRequire(import.meta.url)
+const CURRENT_VERSION = require('../package.json').version
 import http from 'http'
+import https from 'https'
 
 const PILOT_FILES = {
   dir: '.pilot',
@@ -274,9 +280,63 @@ function buildInstanceHint(activeData, currentInstanceId) {
   return '\n--- instances ---\n' + lines + '\nswitch: npx pilot <cmd> instance:xxxxxxxx'
 }
 
+/**
+ * 异步检查 npm 新版本（每天最多一次，3s 超时，非阻塞）
+ * 结果写入 .pilot/npm-check.json：{ date, latest }
+ */
+function checkNpmUpdate(pilotDir) {
+  const checkFile = join(pilotDir, 'npm-check.json')
+  const today = new Date().toISOString().slice(0, 10)
+
+  /** 已经检测过今天就不重复检测 */
+  try {
+    const cached = JSON.parse(readFileSync(checkFile, 'utf-8'))
+    if (cached.date === today) return
+  } catch { /* 文件不存在或格式错误，继续检测 */ }
+
+  const timer = setTimeout(() => req.destroy(), 3000)
+  const req = https.get('https://registry.npmjs.org/vite-plugin-pilot/latest', (res) => {
+    clearTimeout(timer)
+    let body = ''
+    res.on('data', (c) => { body += c })
+    res.on('end', () => {
+      try {
+        const data = JSON.parse(body)
+        if (data.version) {
+          writeFileSync(checkFile, JSON.stringify({ date: today, latest: data.version }), 'utf-8')
+        }
+      } catch { /* ignore */ }
+    })
+  })
+  req.on('error', () => { clearTimeout(timer) })
+  req.on('timeout', () => { clearTimeout(timer); req.destroy() })
+}
+
+/**
+ * 构建新版本提示（从缓存文件读取，有新版本时返回提示文本）
+ */
+function buildUpdateHint(pilotDir) {
+  const checkFile = join(pilotDir, 'npm-check.json')
+  try {
+    const cached = JSON.parse(readFileSync(checkFile, 'utf-8'))
+    if (cached.latest && cached.latest > CURRENT_VERSION) {
+      return `\n--- update ---\nNew version: vite-plugin-pilot@${cached.latest} (current: ${CURRENT_VERSION})\nnpx npm i -g vite-plugin-pilot`
+    }
+  } catch { /* ignore */ }
+  return ''
+}
+
+/** 构建附加提示信息（实例列表 + 新版本提示） */
+function buildHints(pilotDir, activeData, instanceId) {
+  return buildInstanceHint(activeData, instanceId) + buildUpdateHint(pilotDir)
+}
+
 async function main() {
   const { command, flags, positional } = parseArgs(process.argv.slice(2))
   const pilotDir = findPilotDir()
+
+  /** 异步检查 npm 新版本（非阻塞，每天一次） */
+  if (pilotDir) checkNpmUpdate(pilotDir)
 
   /** 解析 instance ID：命令行参数 > 环境变量 > 自动选最近活跃的实例 */
   let instanceId = flags.instance || process.env.PILOT_INSTANCE
@@ -333,7 +393,7 @@ async function main() {
         if (showLogs) params.set('logs', '1')
         const result = await httpGet(`/__pilot/run?${params}`, port, instanceId, 35000)
         if (result && result.status === 200) {
-          console.log(result.body + buildInstanceHint(activeData, instanceId))
+          console.log(result.body + buildHints(pilotDir, activeData, instanceId))
           break
         }
         /** HTTP 返回 NO_BROWSER/TIMEOUT 时 fallback 到文件通道 */
@@ -378,7 +438,7 @@ async function main() {
         if (snapshot) output += '\n---\n' + snapshot
       }
 
-      console.log(output + buildInstanceHint(activeData, instanceId))
+      console.log(output + buildHints(pilotDir, activeData, instanceId))
       break
     }
 
@@ -394,14 +454,14 @@ async function main() {
         const params = new URLSearchParams({ fresh: '1', instance: instanceId })
         const result = await httpGet(`/__pilot/page?${params}`, port, instanceId, 10000)
         if (result && result.status === 200) {
-          console.log(result.body + buildInstanceHint(activeData, instanceId))
+          console.log(result.body + buildHints(pilotDir, activeData, instanceId))
           break
         }
         /** 504=超时，降级到缓存 */
         if (result && result.status === 504) {
           const instanceDir = getInstanceDir(pilotDir, instanceId)
           const cached = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
-          console.log((cached || 'NO_SNAPSHOT') + buildInstanceHint(activeData, instanceId))
+          console.log((cached || 'NO_SNAPSHOT') + buildHints(pilotDir, activeData, instanceId))
           break
         }
         /** 503=无浏览器，降级到文件通道尝试 */
@@ -426,7 +486,7 @@ async function main() {
       const snapshot = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
       const resultFile = join(instanceDir, PILOT_FILES.resultTxt)
       if (existsSync(resultFile)) unlinkSync(resultFile)
-      console.log((snapshot || 'NO_SNAPSHOT') + buildInstanceHint(activeData, instanceId))
+      console.log((snapshot || 'NO_SNAPSHOT') + buildHints(pilotDir, activeData, instanceId))
       break
     }
 
