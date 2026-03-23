@@ -26,6 +26,9 @@ const CURRENT_VERSION = require('../package.json').version
 import http from 'http'
 import https from 'https'
 
+/** 实例活跃判定阈值（秒），超过此时间视为不活跃 */
+const INSTANCE_ACTIVE_THRESHOLD = 90
+
 const PILOT_FILES = {
   dir: '.pilot',
   instancesDir: 'instances',
@@ -258,7 +261,7 @@ function parseArgs(args) {
  * 构建实例信息提示（附在输出末尾，帮助 agent 选择正确的实例）
  */
 function buildInstanceHint(activeData, currentInstanceId) {
-  const recentThreshold = Date.now() - 60 * 1000
+  const recentThreshold = Date.now() - INSTANCE_ACTIVE_THRESHOLD * 1000
   const seenLabels = {}
   const recent = Object.entries(activeData)
     .filter(([, info]) => info.lastSeen >= recentThreshold)
@@ -355,7 +358,7 @@ async function main() {
 
   /** 检查实例是否活跃（90 秒内有连接，3 个心跳周期的容错） */
   const instanceInfo = activeData[instanceId]
-  const recentThreshold = Date.now() - 90 * 1000
+  const recentThreshold = Date.now() - INSTANCE_ACTIVE_THRESHOLD * 1000
   if (!instanceInfo || instanceInfo.lastSeen < recentThreshold) {
     const available = Object.entries(activeData)
       .filter(([, info]) => info.lastSeen >= recentThreshold)
@@ -521,7 +524,7 @@ async function main() {
       const activeFile = join(pilotDir, 'active-instance.json')
       const activeData = readJsonSafe(activeFile) || {}
       /** 只显示最近活跃的实例，每个 label 只显示最近一个（避免同页面多 tab 重复） */
-      const recentThreshold = Date.now() - 60 * 1000
+      const recentThreshold = Date.now() - INSTANCE_ACTIVE_THRESHOLD * 1000
       const seenLabels = {}
       const instanceDetails = Object.entries(activeData)
         .filter(([, info]) => info.lastSeen > recentThreshold)
