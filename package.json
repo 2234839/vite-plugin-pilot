@@ -1,10 +1,10 @@
 {
   "name": "vite-plugin-pilot",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "AI Agent 驾驶浏览器的导航工具 — 打通 浏览器运行时 → Dev Server → 源码 → IDE 的完整链路",
   "type": "module",
   "bin": {
-    "pilot": "./bin/pilot.js"
+    "pilot": "./dist/bin/pilot.js"
   },
   "exports": {
     ".": {

@@ -5,12 +5,15 @@ import { execSync } from 'child_process'
 export default defineConfig({
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: {
+        index: resolve(__dirname, 'src/index.ts'),
+        'bin/pilot': resolve(__dirname, 'src/bin/pilot.ts'),
+      },
       formats: ['es'],
-      fileName: 'index',
+      fileName: (_format, entryName) => entryName === 'bin/pilot' ? 'bin/pilot.js' : 'index.js',
     },
     rollupOptions: {
-      external: ['vite', 'fs', 'path', 'http', '@vue/compiler-dom', 'magic-string'],
+      external: ['vite', 'fs', 'path', 'http', 'https', '@vue/compiler-dom', 'magic-string'],
       /** 生成 TypeScript 类型声明文件 */
       plugins: [
         {

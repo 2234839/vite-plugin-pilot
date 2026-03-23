@@ -9,6 +9,13 @@ import { buildInjectScript } from './client/inject'
 import { buildBridgeScript } from './server/bridge'
 import { buildUserscript } from './server/userscript'
 
+/** 导出供独立 server 和 bin 使用 */
+export { createMiddleware } from './server/middleware'
+export { buildBridgeScript } from './server/bridge'
+export { buildUserscript } from './server/userscript'
+export { DEFAULT_OPTIONS, PILOT_FILES } from './constants'
+export type { PilotOptions, ResolvedPilotOptions } from './types'
+
 /**
  * Vite Plugin Pilot — AI Agent 驾驶浏览器的导航工具
  *
