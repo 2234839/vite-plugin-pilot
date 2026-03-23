@@ -8,6 +8,7 @@
 
 ## TASKS
 
+[x]Console Bridge：生成可粘贴到任意浏览器控制台执行的 JS 脚本，建立 SSE 连接到 dev server，支持跨域（CORS 自动开启）。`pilot bridge` 命令输出脚本，`.pilot/bridge.js` 自动生成。console: 前缀实例与 Vite 注入的 tab 隔离，跳过版本检查和 reload（防止注入代码丢失）。
 [x]要不还是换个思路吧，咱们配置一个项目级的插件，然后在用户输入提示词的时候，将之前通过网页发送过来的指令叠在一起发出去，你看这作为一种claude Channel不能使用的降级方案的话有可行性没有？
 [x]claude Channel 是需要帐号在研究预览列表中才能使用，这个目前还是不方便使用，我觉得可以探索一下  https://code.claude.com/docs/en/remote-control#enable-remote-control-for-all-sessions
 [x]多语言应该让 skill 根据项目情况自行分析然后配置中文还是英文

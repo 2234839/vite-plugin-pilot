@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-pilot",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "description": "AI Agent 驾驶浏览器的导航工具 — 打通 浏览器运行时 → Dev Server → 源码 → IDE 的完整链路",
   "type": "module",
   "bin": {
@@ -26,9 +26,9 @@
     "dev": "vite build && vite --config playground/vite.config.ts --host"
   },
   "peerDependencies": {
-    "vite": ">=5",
     "@vue/compiler-dom": ">=3.3",
-    "magic-string": ">=0.30"
+    "magic-string": ">=0.30",
+    "vite": ">=5"
   },
   "peerDependenciesMeta": {
     "@vue/compiler-dom": {
@@ -40,19 +40,19 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^4.3.0",
-    "@vitejs/plugin-vue": "^5.2.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-vue": "^6.0.5",
     "@vue/compiler-dom": "^3.5.30",
     "magic-string": "^0.30.21",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "typescript": "^5.7.0",
-    "vite": "^6.2.0",
-    "vue": "^3.5.0",
-    "ws": "^8.19.0"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.1",
+    "vue": "^3.5.30",
+    "ws": "^8.20.0"
   },
   "keywords": [
     "vite",

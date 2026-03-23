@@ -5,6 +5,7 @@ import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
 import { generateElementPrompt } from '../prompt/generator'
 import { getCompactText } from './compact'
+import { buildBridgeScript } from './bridge'
 
 /** 等待者类型，决定 POST /result handler 的响应格式 */
 type WaiterType = 'default' | 'run' | 'page' | 'snapshot'
@@ -148,8 +149,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         }
         bridge.writeActiveInstance(sseInstance, urlPath)
 
-        /** 版本不匹配时立即返回 reload 指令然后关闭连接 */
-        if (clientVersion && pilotVersion && clientVersion !== pilotVersion) {
+        /** 版本不匹配时立即返回 reload 指令然后关闭连接
+         *  Console Bridge 实例（console: 前缀）跳过版本检查（无法 reload，会丢失注入代码） */
+        if (clientVersion && pilotVersion && clientVersion !== pilotVersion && !sseInstance.startsWith('console:')) {
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -172,8 +174,11 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         if (!sseConnections[sseInstance]) sseConnections[sseInstance] = []
         sseConnections[sseInstance].push(res)
 
-        /** 每 30s 发送心跳，防止代理/防火墙静默断开空闲 SSE 连接 */
+        /** 每 30s 发送心跳，防止代理/防火墙静默断开空闲 SSE 连接
+         *  同时更新活跃时间，确保 CLI 的 30s 活跃检测不会误判 */
         const heartbeat = setInterval(() => {
+          lastBrowserActivity[sseInstance] = Date.now()
+          bridge.writeActiveInstance(sseInstance, urlPath)
           res.write('event: ping\ndata: 1\n\n')
         }, 30_000)
 
@@ -489,6 +494,22 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           res.writeHead(504, { 'Content-Type': 'text/plain' })
           res.end('TIMEOUT')
         })
+        return
+      }
+
+      /** ---------- GET /__pilot/bridge.js (Console Bridge 脚本) ----------
+       *  返回一段自包含的 JS 代码，用户粘贴到任意浏览器控制台执行
+       *  执行后建立 SSE 连接到 dev server，之后 pilot CLI 可操控该页面 */
+      if (endpoint === '/__pilot/bridge.js' && req.method === 'GET') {
+        /** 使用请求的 Host header 构建 origin（CLI 通过 localhost 访问，自动适配端口） */
+        const host = req.headers.host || 'localhost'
+        const serverOrigin = `http://${host}`
+        const bridgeScript = buildBridgeScript(options, pilotVersion || String(Date.now()), serverOrigin)
+        res.writeHead(200, {
+          'Content-Type': 'application/javascript',
+          'Cache-Control': 'no-cache',
+        })
+        res.end(bridgeScript)
         return
       }
 

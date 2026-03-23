@@ -241,18 +241,45 @@ function parseArgs(args) {
     else if (arg === 'nologs') flags.nologs = true
     else if (arg === 'fresh') flags.fresh = true
     else if (arg === 'cached') flags.cached = true
+    else if (arg.startsWith('instance:')) flags.instance = arg.slice(9)
     else positional.push(arg)
   }
 
   return { command, flags, positional }
 }
 
+/**
+ * 构建实例信息提示（附在输出末尾，帮助 agent 选择正确的实例）
+ */
+function buildInstanceHint(activeData, currentInstanceId) {
+  const recentThreshold = Date.now() - 60 * 1000
+  const seenLabels = {}
+  const recent = Object.entries(activeData)
+    .filter(([, info]) => info.lastSeen >= recentThreshold)
+    .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
+    .filter(([, info]) => {
+      if (seenLabels[info.label]) return false
+      seenLabels[info.label] = true
+      return true
+    })
+    .map(([id, info]) => {
+      const isCurrent = id === currentInstanceId ? '← ' : '  '
+      /** console: 前缀实例显示完整 ID，普通实例显示前 8 位 */
+      const displayId = id.startsWith('console:') ? id : id.slice(0, 8)
+      return `${isCurrent}${displayId} (${info.label})`
+    })
+
+  if (recent.length <= 1) return ''
+  const lines = recent.join('\n')
+  return '\n--- instances ---\n' + lines + '\nswitch: npx pilot <cmd> instance:xxxxxxxx'
+}
+
 async function main() {
   const { command, flags, positional } = parseArgs(process.argv.slice(2))
   const pilotDir = findPilotDir()
 
-  /** 解析 instance ID：default 自动选最近活跃的实例，否则用指定的 UUID */
-  let instanceId = process.env.PILOT_INSTANCE
+  /** 解析 instance ID：命令行参数 > 环境变量 > 自动选最近活跃的实例 */
+  let instanceId = flags.instance || process.env.PILOT_INSTANCE
   const activeFile = join(pilotDir, 'active-instance.json')
   const activeData = readJsonSafe(activeFile) || {}
   if (!instanceId || instanceId === 'default') {
@@ -266,16 +293,20 @@ async function main() {
     instanceId = instanceId || 'default'
   }
 
-  /** 检查实例是否活跃（30 秒内有连接），不活跃时提示可用实例列表 */
+  /** 检查实例是否活跃（90 秒内有连接，3 个心跳周期的容错） */
   const instanceInfo = activeData[instanceId]
-  const recentThreshold = Date.now() - 30 * 1000
+  const recentThreshold = Date.now() - 90 * 1000
   if (!instanceInfo || instanceInfo.lastSeen < recentThreshold) {
     const available = Object.entries(activeData)
       .filter(([, info]) => info.lastSeen >= recentThreshold)
       .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
-      .map(([id, info]) => `  ${id.slice(0, 8)} (${info.label})`)
+      .map(([id, info]) => {
+        const displayId = id.startsWith('console:') ? id : id.slice(0, 8)
+        return `  ${displayId} (${info.label})`
+      })
     if (available.length > 0) {
-      console.error(`WARNING: 实例 ${instanceId.slice(0, 8)} 不活跃，可用实例:\n${available.join('\n')}\n提示: PILOT_INSTANCE=xxxxxxxx node bin/pilot.js ${command}`)
+      const currentDisplay = instanceId.startsWith('console:') ? instanceId : instanceId.slice(0, 8)
+      console.error(`WARNING: 实例 ${currentDisplay} 不活跃，可用实例:\n${available.join('\n')}\n提示: npx pilot ${command} instance:xxxxxxxx`)
     }
   }
 
@@ -302,7 +333,7 @@ async function main() {
         if (showLogs) params.set('logs', '1')
         const result = await httpGet(`/__pilot/run?${params}`, port, instanceId, 35000)
         if (result && result.status === 200) {
-          console.log(result.body)
+          console.log(result.body + buildInstanceHint(activeData, instanceId))
           break
         }
         /** HTTP 返回 NO_BROWSER/TIMEOUT 时 fallback 到文件通道 */
@@ -347,7 +378,7 @@ async function main() {
         if (snapshot) output += '\n---\n' + snapshot
       }
 
-      console.log(output)
+      console.log(output + buildInstanceHint(activeData, instanceId))
       break
     }
 
@@ -363,14 +394,14 @@ async function main() {
         const params = new URLSearchParams({ fresh: '1', instance: instanceId })
         const result = await httpGet(`/__pilot/page?${params}`, port, instanceId, 10000)
         if (result && result.status === 200) {
-          console.log(result.body)
+          console.log(result.body + buildInstanceHint(activeData, instanceId))
           break
         }
         /** 504=超时，降级到缓存 */
         if (result && result.status === 504) {
           const instanceDir = getInstanceDir(pilotDir, instanceId)
           const cached = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
-          console.log(cached || 'NO_SNAPSHOT')
+          console.log((cached || 'NO_SNAPSHOT') + buildInstanceHint(activeData, instanceId))
           break
         }
         /** 503=无浏览器，降级到文件通道尝试 */
@@ -395,7 +426,7 @@ async function main() {
       const snapshot = readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
       const resultFile = join(instanceDir, PILOT_FILES.resultTxt)
       if (existsSync(resultFile)) unlinkSync(resultFile)
-      console.log(snapshot || 'NO_SNAPSHOT')
+      console.log((snapshot || 'NO_SNAPSHOT') + buildInstanceHint(activeData, instanceId))
       break
     }
 
@@ -459,6 +490,26 @@ async function main() {
       break
     }
 
+    case 'bridge': {
+      if (!pilotDir) {
+        console.error('ERROR: 未找到 .pilot 目录，请先启动 dev server')
+        process.exit(1)
+      }
+      const port = getServerPort(pilotDir)
+      if (!port) {
+        console.error('ERROR: 未找到 port.txt，请先启动 dev server')
+        process.exit(1)
+      }
+      const result = await httpGet('/__pilot/bridge.js', port, 'console:dummy', 5000)
+      if (result && result.status === 200) {
+        console.log(result.body)
+      } else {
+        console.error('ERROR: 无法获取 bridge.js，请确认 dev server 正在运行')
+        process.exit(1)
+      }
+      break
+    }
+
     case 'help':
     default:
       console.log(`pilot — vite-plugin-pilot CLI (HTTP 优先，文件通道 fallback)
@@ -466,13 +517,14 @@ async function main() {
 用法: pilot <command> [args]
 
 命令:
-  run <code> [nopage] [nologs]  执行 JS，默认附带日志+页面快照
-  page [cached]              读取页面快照（默认实时采集，cached=读缓存）
-  logs                     最近一次 exec 的控制台日志
-  status                   文件系统状态诊断
-  help                     显示此帮助信息
+  run <code> [nopage] [nologs] [instance:xxx]  执行 JS，默认附带日志+页面快照
+  page [cached] [instance:xxx]                  读取页面快照（默认实时采集，cached=读缓存）
+  logs [instance:xxx]                           最近一次 exec 的控制台日志
+  status                                        文件系统状态诊断
+  bridge                                        输出 Console Bridge 脚本（粘贴到任意浏览器控制台）
+  help                                          显示此帮助信息
 
-环境变量: PILOT_INSTANCE
+实例选择: instance:xxxxxxxx 或环境变量 PILOT_INSTANCE
 目录探测: cwd
 
 --- 浏览器端辅助函数 (在 run 中执行) ---

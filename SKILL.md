@@ -24,12 +24,15 @@ npx pilot page                    # 查看页面状态（compact snapshot）
 npx pilot run 'code'              # 执行 JS + 结果 + 日志 + 页面快照（默认全附带）
 npx pilot run 'code' nopage       # 执行 JS + 结果 + 日志（不附带页面快照）
 npx pilot run 'code' nologs       # 执行 JS + 结果 + 页面快照（不附带日志）
+npx pilot run 'code' instance:xxx # 指定目标实例执行
 npx pilot logs                    # 查看最近控制台日志
 npx pilot status                  # 列出已连接的浏览器 tab
 npx pilot help                    # 查看辅助函数列表
 ```
 
 **使用模式**：`run 'code'` 默认返回结果+日志+页面快照，一步即可看到完整信息。`page` 单独查看 compact snapshot。
+
+**实例选择**：多个浏览器 tab 打开时，执行结果末尾会显示可用实例列表（`--- instances ---`），用 `←` 标记当前实例。切换实例用 `instance:xxxxxxxx` 参数或 `PILOT_INSTANCE` 环境变量。
 
 ## 辅助函数
 

@@ -168,16 +168,22 @@ export const wsClientCode = `
     return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
   }
 
+  /** 构建 API URL（Console Bridge 模式下使用绝对 URL 连接 dev server） */
+  function apiUrl(path) {
+    if (window.__PILOT_SERVER_ORIGIN__) return window.__PILOT_SERVER_ORIGIN__ + path;
+    return path;
+  }
+
   /** 通过 HTTP POST 发送执行结果（失败自动重试一次，确保 CLI 不超时） */
   function postResult(result) {
-    fetch('/__pilot/result', {
+    fetch(apiUrl('/__pilot/result'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
       body: JSON.stringify(result)
     }).catch(function() {
       /** 后台 tab 或网络抖动导致首次失败时，200ms 后重试一次 */
       setTimeout(function() {
-        fetch('/__pilot/result', {
+        fetch(apiUrl('/__pilot/result'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId },
           body: JSON.stringify(result)
@@ -239,7 +245,7 @@ export const wsClientCode = `
 
   /** 通过 SSE 接收代码推送，替代 HTTP 轮询 */
   function connectSSE() {
-    var url = '/__pilot/sse?instance=' + __pilot_instanceId + '&version=' + __PILOT_VERSION__;
+    var url = apiUrl('/__pilot/sse?instance=' + __pilot_instanceId + '&version=' + __PILOT_VERSION__);
     var es = new EventSource(url);
     window.__pilot_es = es;
 
@@ -250,7 +256,10 @@ export const wsClientCode = `
 
     es.addEventListener('reload', function() {
       es.close();
-      location.reload();
+      /** Console Bridge 模式下不 reload（控制台注入的代码会丢失） */
+      if (!window.__pilot_bridge_active) {
+        location.reload();
+      }
     });
 
     es.onerror = function() {
