@@ -14,10 +14,34 @@ export const logCollectorCode = `
   var logs = [];
   window.__pilot_errorCount = 0;
 
-  function stringify(arg) {
-    if (typeof arg === 'string') return arg;
-    if (arg instanceof Error) return arg.message + '\\n' + arg.stack;
-    try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+  /** 安全字符串化，限制深度和长度，防止复杂对象（Vue 实例、DOM 等）卡死主线程 */
+  var MAX_STRINGIFY_DEPTH = 3;
+  var MAX_STRINGIFY_LEN = 500;
+
+  function stringify(arg, depth) {
+    if (depth === undefined) depth = 0;
+    if (typeof arg === 'string') return arg.length > MAX_STRINGIFY_LEN ? arg.slice(0, MAX_STRINGIFY_LEN) + '...' : arg;
+    if (typeof arg === 'number' || typeof arg === 'boolean') return String(arg);
+    if (arg === null || arg === undefined) return String(arg);
+    if (arg instanceof Error) return arg.message;
+    if (depth >= MAX_STRINGIFY_DEPTH) return '[Object]';
+    try {
+      /** 数组特殊处理：只取前 5 项 */
+      if (Array.isArray(arg)) {
+        if (arg.length > 5) return '[' + arg.slice(0, 5).map(function(a) { return stringify(a, depth + 1); }).join(', ') + ', ...(' + arg.length + ')]';
+        return '[' + arg.map(function(a) { return stringify(a, depth + 1); }).join(', ') + ']';
+      }
+      /** 普通对象：只取前 5 个 key */
+      var keys = Object.keys(arg);
+      if (keys.length > 5) {
+        var parts = keys.slice(0, 5).map(function(k) { return k + ': ' + stringify(arg[k], depth + 1); });
+        var result = '{' + parts.join(', ') + ', ...(' + keys.length + ')}';
+        return result.length > MAX_STRINGIFY_LEN ? result.slice(0, MAX_STRINGIFY_LEN) + '...' : result;
+      }
+      var parts = keys.map(function(k) { return k + ': ' + stringify(arg[k], depth + 1); });
+      var result = '{' + parts.join(', ') + '}';
+      return result.length > MAX_STRINGIFY_LEN ? result.slice(0, MAX_STRINGIFY_LEN) + '...' : result;
+    } catch(e) { return String(arg); }
   }
 
   /** 存储最近 3 条错误信息，供 snapshot 采集 */
@@ -28,10 +52,18 @@ export const logCollectorCode = `
   /** 已知噪音日志（vite 警告等），不计入 errorCount 也不纳入 lastErrors */
   var ERROR_NOISE = ['[vite]', 'failed to connect to websocket', '[Vue warn]'];
 
+  /** 将 args 延迟转换为 message 字符串（首次访问时缓存），暴露给 ws-client 消费 */
+  window.__pilot_logToMessage = function(entry) {
+    if (entry.message !== undefined) return entry.message;
+    entry.message = Array.from(entry.args).map(stringify).join(' ');
+    entry.args = null;
+    return entry.message;
+  }
+
   function addLog(type, args) {
     if (type === 'error') {
+      /** error 路径仍需立即 stringify（噪音检测+lastErrors），但 error 频率低 */
       var msg = Array.from(args).map(stringify).join(' ').slice(0, 100);
-      /** 噪音日志仍记录到 logs（完整日志），但不计入错误统计 */
       var isNoise = ERROR_NOISE.some(function(k) { return msg.indexOf(k) >= 0; });
       if (!isNoise) {
         window.__pilot_errorCount++;
@@ -42,7 +74,7 @@ export const logCollectorCode = `
     logs.push({
       timestamp: new Date().toISOString(),
       type: type,
-      message: Array.from(args).map(stringify).join(' ')
+      args: args
     });
     if (logs.length > maxLogs) logs.shift();
   }

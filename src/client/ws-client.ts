@@ -59,7 +59,7 @@ export const wsClientCode = `
         return true;
       })
       .map(function(l) {
-        var msg = l.message;
+        var msg = window.__pilot_logToMessage(l);
         /** warn/info 截断到 150 字符（去掉 Vue 组件堆栈等冗余信息），error 保留完整信息 */
         if (l.type !== 'error' && msg.length > 150) {
           var cutIdx = msg.indexOf('\\n');
