@@ -7,6 +7,7 @@ import { createMiddleware } from './server/middleware'
 import { createSourceLocator } from './server/source-locator'
 import { buildInjectScript } from './client/inject'
 import { buildBridgeScript } from './server/bridge'
+import { buildUserscript } from './server/userscript'
 
 /**
  * Vite Plugin Pilot — AI Agent 驾驶浏览器的导航工具
@@ -74,6 +75,9 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
             const origin = `http://localhost:${addr.port}`
             const script = buildBridgeScript(resolvedOptions, pilotVersion, origin)
             writeFileSync(join(resolvedOptions.pilotDir, 'bridge.js'), script, 'utf-8')
+            /** 自动生成 userscript.js 到 .pilot/ 目录，方便用户安装到 Tampermonkey */
+            const userscript = buildUserscript(resolvedOptions, pilotVersion, origin)
+            writeFileSync(join(resolvedOptions.pilotDir, 'userscript.user.js'), userscript, 'utf-8')
           }
         })
       }

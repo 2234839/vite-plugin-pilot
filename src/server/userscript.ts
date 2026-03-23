@@ -43,7 +43,7 @@ function replacePlaceholders(code: string, options: ResolvedPilotOptions, pilotV
     .replace(/__LOCALE_STYLE__/g, '')
 }
 
-/** userscript 专用的通信层：用 GM_xmlhttpRequest 替代 fetch/SSE */
+/** userscript 专用的通信层：优先 SSE（EventSource），fallback 到 GM_xmlhttpRequest 轮询 */
 const userscriptClientCode = `
 (function() {
   window.__pilot_gen = (window.__pilot_gen || 0) + 1;
@@ -188,16 +188,35 @@ const userscriptClientCode = `
     return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
   }
 
-  /** 使用 GM_xmlhttpRequest 发送 HTTP POST（绕过 CSP 跨域限制） */
+  /** 优先使用 fetch 发送结果（同源时可用），fallback 到 GM_xmlhttpRequest */
   function postResult(result) {
+    var payload = JSON.stringify(result);
+    var headers = {
+      'Content-Type': 'application/json',
+      'X-Pilot-Instance': window.__pilot_instanceId,
+      'X-Pilot-Title': document.title || ''
+    };
+    try {
+      fetch(serverOrigin + '/__pilot/result', {
+        method: 'POST',
+        headers: headers,
+        body: payload
+      }).catch(function() {
+        gmPost(payload, headers);
+      });
+    } catch(e) {
+      gmPost(payload, headers);
+    }
+  }
+
+  /** GM_xmlhttpRequest fallback（跨域或 CSP 限制时使用） */
+  function gmPost(payload, headers) {
+    if (typeof GM_xmlhttpRequest === 'undefined') return;
     GM_xmlhttpRequest({
       method: 'POST',
       url: serverOrigin + '/__pilot/result',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Pilot-Instance': window.__pilot_instanceId
-      },
-      data: JSON.stringify(result)
+      headers: headers,
+      data: payload
     });
   }
 
@@ -243,8 +262,49 @@ const userscriptClientCode = `
     }
   }
 
-  /** HTTP 轮询替代 SSE：定期检查是否有待执行代码 */
+  /** 优先使用 EventSource（SSE）接收代码推送，失败时 fallback 到轮询 */
+  var sseConnected = false;
+
+  function connectSSE() {
+    try {
+      var es = new EventSource(serverOrigin + '/__pilot/sse?instance=' + window.__pilot_instanceId + '&version=' + __PILOT_VERSION__ + '&title=' + encodeURIComponent(document.title || ''));
+      window.__pilot_es = es;
+      es.addEventListener('code', function(e) {
+        if (myGen !== window.__pilot_gen) return;
+        handleCode(e.data);
+      });
+      es.addEventListener('ping', function() {
+        sseConnected = true;
+      });
+      es.addEventListener('reload', function() {
+        /** Userscript 模式下不 reload（注入代码会丢失） */
+        es.close();
+      });
+      es.onerror = function() {
+        if (myGen !== window.__pilot_gen) { es.close(); return; }
+        es.close();
+        sseConnected = false;
+        /** SSE 连接失败，5s 后尝试重连，同时启动轮询作为 fallback */
+        setTimeout(function() { connectSSE(); }, 5000);
+        startPolling();
+      };
+      console.log('[Pilot] SSE connecting...');
+    } catch(e) {
+      startPolling();
+    }
+  }
+
+  /** 轮询 fallback（SSE 不可用时）：定期检查是否有待执行代码 */
+  var pollTimer = null;
+  function startPolling() {
+    if (pollTimer) return;
+    console.log('[Pilot] SSE unavailable, fallback to polling');
+    pollCode();
+    pollTimer = setInterval(pollCode, 2000);
+  }
+
   function pollCode() {
+    if (typeof GM_xmlhttpRequest === 'undefined') return;
     GM_xmlhttpRequest({
       method: 'GET',
       url: serverOrigin + '/__pilot/has-code?instance=' + window.__pilot_instanceId,
@@ -257,18 +317,25 @@ const userscriptClientCode = `
     });
   }
 
-  /** 向服务端注册实例（写入 active-instance.json） */
-  GM_xmlhttpRequest({
-    method: 'GET',
-    url: serverOrigin + '/__pilot/register?instance=' + window.__pilot_instanceId + '&path=' + encodeURIComponent(location.pathname) + '&title=' + encodeURIComponent(document.title),
-    onload: function() {
-      console.log('[Pilot] Instance registered: ' + window.__pilot_instanceId);
+  /** 向服务端注册实例 */
+  function registerInstance() {
+    var registerUrl = serverOrigin + '/__pilot/register?instance=' + window.__pilot_instanceId + '&path=' + encodeURIComponent(location.pathname) + '&title=' + encodeURIComponent(document.title);
+    try {
+      fetch(registerUrl).catch(function() {
+        if (typeof GM_xmlhttpRequest !== 'undefined') {
+          GM_xmlhttpRequest({ method: 'GET', url: registerUrl });
+        }
+      });
+    } catch(e) {
+      if (typeof GM_xmlhttpRequest !== 'undefined') {
+        GM_xmlhttpRequest({ method: 'GET', url: registerUrl });
+      }
     }
-  });
+  }
 
-  console.log('[Pilot] Userscript polling started (gen=' + myGen + ', instance=' + window.__pilot_instanceId + ')');
-  pollCode();
-  setInterval(pollCode, 2000);
+  registerInstance();
+  console.log('[Pilot] Userscript started (gen=' + myGen + ', instance=' + window.__pilot_instanceId + ')');
+  connectSSE();
 })();
 `
 
