@@ -1,24 +1,57 @@
+import type { ResolvedPilotOptions } from '../types'
+import { logCollectorCode } from '../client/log-collector'
+import { snapshotCode } from '../client/snapshot'
+
 /**
- * 客户端通信代码（字符串形式，用于注入到浏览器）
+ * 生成 Tampermonkey/Greasemonkey 兼容的 userscript
  *
- * 策略：SSE（Server-Sent Events）接收代码推送
- * EventSource 不支持自定义 headers，instance 和 version 通过 query params 传递
+ * 与 bridge.ts 的区别：
+ * - 使用 GM_xmlhttpRequest 替代 fetch/EventSource（绕过页面 CSP 限制）
+ * - HTTP 轮询替代 SSE 接收代码推送
+ * - 包含 ==UserScript== 元数据头，可直接安装到油猴
+ * - server origin 硬编码为默认值，用户可在脚本顶部修改
  */
 
-export const wsClientCode = `
+/** 替换所有占位符 */
+function replacePlaceholders(code: string, options: ResolvedPilotOptions, pilotVersion: string): string {
+  return code
+    .replace(/__MAX_BUFFER_SIZE__/g, String(options.maxBufferSize))
+    .replace(/__FLUSH_INTERVAL__/g, String(options.flushInterval))
+    .replace(/__EXEC_TIMEOUT__/g, String(options.execTimeout))
+    .replace(/__MAX_RESULT_SIZE__/g, String(options.maxResultSize))
+    .replace(/__PILOT_VERSION__/g, pilotVersion)
+    .replace(/__LOCALE_SELECTED__/g, '')
+    .replace(/__LOCALE_TEXT__/g, '')
+    .replace(/__LOCALE_EMPTY__/g, '')
+    .replace(/__LOCALE_PLACEHOLDER__/g, '')
+    .replace(/__LOCALE_SEND_TO_CLAUDE__/g, '')
+    .replace(/__LOCALE_COPY_PROMPT__/g, '')
+    .replace(/__LOCALE_CLOSE__/g, '')
+    .replace(/__LOCALE_CLOSE_IN__/g, '')
+    .replace(/__LOCALE_COPIED__/g, '')
+    .replace(/__LOCALE_SENDING__/g, '')
+    .replace(/__LOCALE_SENT__/g, '')
+    .replace(/__LOCALE_SEND_FAILED__/g, '')
+    .replace(/__LOCALE_NOT_CONNECTED__/g, '')
+    .replace(/__LOCALE_ELEMENT_INFO__/g, '')
+    .replace(/__LOCALE_TAG__/g, '')
+    .replace(/__LOCALE_COMPONENT__/g, '')
+    .replace(/__LOCALE_SOURCE__/g, '')
+    .replace(/__LOCALE_DOM_PATH__/g, '')
+    .replace(/__LOCALE_POSITION__/g, '')
+    .replace(/__LOCALE_TEXT_CONTENT__/g, '')
+    .replace(/__LOCALE_STYLE__/g, '')
+}
+
+/** userscript 专用的通信层：用 GM_xmlhttpRequest 替代 fetch/SSE */
+const userscriptClientCode = `
 (function() {
-  /** HMR 代际计数器：旧实例的 SSE 通过比对代际自动关闭 */
   window.__pilot_gen = (window.__pilot_gen || 0) + 1;
   var myGen = window.__pilot_gen;
 
-  /** 清理旧实例的 SSE 连接 */
-  if (window.__pilot_es) {
-    window.__pilot_es.close();
-    window.__pilot_es = null;
-  }
-
   var execTimeout = __EXEC_TIMEOUT__;
   var maxResultSize = __MAX_RESULT_SIZE__;
+  var serverOrigin = window.__PILOT_SERVER_ORIGIN__;
 
   function serializeResult(val) {
     var str;
@@ -43,16 +76,13 @@ export const wsClientCode = `
     };
   }
 
-  /** 已知的噪音日志关键词，匹配时不纳入 exec 日志以节省 token */
   var LOG_NOISE = ['[Vue warn]', '[vite]', '[COSE]', '[Pilot] Running'];
 
-  /** 截取 exec 期间新增的日志条目（紧凑格式：[TYPE] message） */
   function getLogsSince(idx) {
     if (!window.__pilot_logs) return [];
     var newLogs = window.__pilot_logs.slice(idx);
     return newLogs
       .filter(function(l) {
-        /** 过滤框架/工具噪音日志 */
         for (var ni = 0; ni < LOG_NOISE.length; ni++) {
           if (l.message.indexOf(LOG_NOISE[ni]) !== -1) return false;
         }
@@ -60,7 +90,6 @@ export const wsClientCode = `
       })
       .map(function(l) {
         var msg = window.__pilot_logToMessage(l);
-        /** warn/info 截断到 150 字符（去掉 Vue 组件堆栈等冗余信息），error 保留完整信息 */
         if (l.type !== 'error' && msg.length > 150) {
           var cutIdx = msg.indexOf('\\n');
           msg = cutIdx > 0 && cutIdx < 150 ? msg.slice(0, cutIdx) : msg.slice(0, 150) + '...';
@@ -70,19 +99,12 @@ export const wsClientCode = `
   }
 
   function execCode(code) {
-    /** 检测是否需要 async 执行（显式 await 或调用返回 Promise 的辅助函数） */
     var hasAwait = /\\bawait\\b/.test(code) || code.indexOf('__pilot_waitFor(') !== -1 || code.indexOf('__pilot_wait(') !== -1
       || code.indexOf('__pilot_typeByPlaceholder(') !== -1 || code.indexOf('__pilot_type(') !== -1
       || code.indexOf('__pilot_checkMultipleByText(') !== -1 || code.indexOf('__pilot_waitEnabled(') !== -1;
-    /** 记录 exec 开始时的日志位置，用于截取 exec 期间产生的新日志 */
     var logStartIdx = window.__pilot_logs ? window.__pilot_logs.length : 0;
 
     if (hasAwait) {
-      /** async exec：使用 AsyncFunction 构造器支持 await 语法
-       *  自动在最后一个表达式前添加 return，使 async exec 与 sync eval 行为一致
-       *  用法: await __pilot_wait(100); __pilot_clickByText("提交")
-       *  用法: await __pilot_wait(50); JSON.stringify({...})
-       */
       var lines = code.split('\\n');
       var lastIdx = -1;
       for (var li = lines.length - 1; li >= 0; li--) {
@@ -95,7 +117,6 @@ export const wsClientCode = `
       if (lastIdx >= 0) {
         var lastLine = lines[lastIdx].trim();
         if (!/^return\\b/.test(lastLine) && !/^}/.test(lastLine)) {
-          /** 单行含分号时，提取最后一个 ; 后的表达式加 return（避免 return await 导致后续表达式不可达） */
           var semiIdx = lastLine.lastIndexOf(';');
           if (semiIdx !== -1 && semiIdx < lastLine.length - 1) {
             var prefix = lastLine.slice(0, semiIdx + 1);
@@ -140,7 +161,6 @@ export const wsClientCode = `
     }, execTimeout);
 
     try {
-      /** 支持 return 语句：检测顶层 return 并用 IIFE 包裹 */
       var hasTopReturn = false;
       var depth = 0;
       for (var ci = 0; ci < code.length; ci++) {
@@ -168,41 +188,26 @@ export const wsClientCode = `
     return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
   }
 
-  /** 构建 API URL（Console Bridge 模式下使用绝对 URL 连接 dev server） */
-  function apiUrl(path) {
-    if (window.__PILOT_SERVER_ORIGIN__) return window.__PILOT_SERVER_ORIGIN__ + path;
-    return path;
-  }
-
-  /** 通过 HTTP POST 发送执行结果（失败自动重试一次，确保 CLI 不超时） */
+  /** 使用 GM_xmlhttpRequest 发送 HTTP POST（绕过 CSP 跨域限制） */
   function postResult(result) {
-    fetch(apiUrl('/__pilot/result'), {
+    GM_xmlhttpRequest({
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId, 'X-Pilot-Title': document.title || '' },
-      body: JSON.stringify(result)
-    }).catch(function() {
-      /** 后台 tab 或网络抖动导致首次失败时，200ms 后重试一次 */
-      setTimeout(function() {
-        fetch(apiUrl('/__pilot/result'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId, 'X-Pilot-Title': document.title || '' },
-          body: JSON.stringify(result)
-        }).catch(function() {});
-      }, 200);
+      url: serverOrigin + '/__pilot/result',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Pilot-Instance': window.__pilot_instanceId
+      },
+      data: JSON.stringify(result)
     });
   }
 
-  /** 发送执行结果（POST /result handler 内部已调用 writeExecDone） */
   function sendResult(result) {
     postResult(result);
   }
 
-  /** 执行锁：防止快速连续代码推送时并发执行导致 snapshot 竞态 */
   var isExecuting = false;
-  /** 排队的代码（exec 锁忙时暂存，当前 exec 完成后立即执行） */
   var pendingCode = null;
 
-  /** 执行代码并发送结果的通用处理 */
   function handleCode(code) {
     if (isExecuting) {
       pendingCode = code;
@@ -210,19 +215,15 @@ export const wsClientCode = `
     }
     isExecuting = true;
     var result = execCode(code);
-    /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
-     *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
     function sendWithSnapshot(result) {
       if (window.__pilot_snapshot && !document.hidden) {
         requestAnimationFrame(function() {
           if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
           sendResult(result);
-          /** exec 完成，检查是否有排队的代码需要执行 */
           isExecuting = false;
           if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
         });
       } else if (window.__pilot_snapshot) {
-        /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
         setTimeout(function() {
           if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
           sendResult(result);
@@ -235,7 +236,6 @@ export const wsClientCode = `
         if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
       }
     }
-    /** async exec 返回 Promise，需要等待完成后再采集 snapshot */
     if (result && typeof result.then === 'function') {
       result.then(function(r) { sendWithSnapshot(r); });
     } else {
@@ -243,35 +243,78 @@ export const wsClientCode = `
     }
   }
 
-  /** 通过 SSE 接收代码推送，替代 HTTP 轮询 */
-  function connectSSE() {
-    var titleParam = encodeURIComponent(document.title || '');
-    var url = apiUrl('/__pilot/sse?instance=' + __pilot_instanceId + '&version=' + __PILOT_VERSION__ + '&title=' + titleParam);
-    var es = new EventSource(url);
-    window.__pilot_es = es;
-
-    es.addEventListener('code', function(e) {
-      if (myGen !== window.__pilot_gen) return;
-      handleCode(e.data);
-    });
-
-    es.addEventListener('reload', function() {
-      es.close();
-      /** Console Bridge 模式下不 reload（控制台注入的代码会丢失） */
-      if (!window.__pilot_bridge_active) {
-        location.reload();
+  /** HTTP 轮询替代 SSE：定期检查是否有待执行代码 */
+  function pollCode() {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: serverOrigin + '/__pilot/has-code?instance=' + window.__pilot_instanceId,
+      onload: function(r) {
+        if (r.status === 200 && r.responseText && r.responseText.trim()) {
+          if (myGen !== window.__pilot_gen) return;
+          handleCode(r.responseText);
+        }
       }
     });
-
-    es.onerror = function() {
-      /** EventSource 浏览器自动重连，仅在代际过期时手动关闭 */
-      if (myGen !== window.__pilot_gen) {
-        es.close();
-      }
-    };
   }
 
-  console.log('[Pilot] Running with SSE (gen=' + myGen + ')');
-  connectSSE();
+  /** 向服务端注册实例（写入 active-instance.json） */
+  GM_xmlhttpRequest({
+    method: 'GET',
+    url: serverOrigin + '/__pilot/register?instance=' + window.__pilot_instanceId + '&path=' + encodeURIComponent(location.pathname) + '&title=' + encodeURIComponent(document.title),
+    onload: function() {
+      console.log('[Pilot] Instance registered: ' + window.__pilot_instanceId);
+    }
+  });
+
+  console.log('[Pilot] Userscript polling started (gen=' + myGen + ', instance=' + window.__pilot_instanceId + ')');
+  pollCode();
+  setInterval(pollCode, 2000);
 })();
 `
+
+export function buildUserscript(options: ResolvedPilotOptions, pilotVersion: string, serverOrigin: string): string {
+  const modules = [
+    { name: 'Log Collector', code: replacePlaceholders(logCollectorCode, options, pilotVersion) },
+    { name: 'Userscript Client', code: replacePlaceholders(userscriptClientCode, options, pilotVersion) },
+    { name: 'Page Snapshot', code: replacePlaceholders(snapshotCode, options, pilotVersion) },
+  ]
+
+  const body = modules
+    .map(({ name, code }) => `  /* === ${name} === */\n  ${code.trim()}`)
+    .join('\n\n')
+
+  return `// ==UserScript==
+// @name         Pilot Bridge
+// @namespace    https://github.com/2234839/vite-plugin-pilot
+// @version      ${pilotVersion}
+// @description  AI Agent browser automation bridge — connect to vite-plugin-pilot dev server
+// @author       2234839
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// @connect      localhost
+// @connect      127.0.0.1
+// @run-at       document-idle
+// ==/UserScript==
+
+// [Pilot] Tampermonkey Userscript — 安装到油猴后自动在所有页面运行
+// 修改下方 SERVER_ORIGIN 指向你的 dev server 地址
+(function() {
+  if (window.__pilot_userscript_active) return;
+  window.__pilot_userscript_active = true;
+
+  /** ==================== 配置 ==================== */
+  /** dev server 地址，按需修改 */
+  var SERVER_ORIGIN = "${serverOrigin}";
+  window.__PILOT_SERVER_ORIGIN__ = SERVER_ORIGIN;
+  window.__pilot_instanceId = "userscript:" + Math.random().toString(16).slice(2, 10);
+  var __PILOT_VERSION__ = "${pilotVersion}";
+  /** ==================== 配置结束 ==================== */
+
+  console.log("[Pilot] Userscript starting... (instance: " + window.__pilot_instanceId + ")");
+  console.log("[Pilot] Server: " + SERVER_ORIGIN);
+
+${body}
+
+  console.log("[Pilot] Userscript ready! Use: npx pilot run 'your code' (PILOT_INSTANCE=" + window.__pilot_instanceId + ")");
+})();`
+}

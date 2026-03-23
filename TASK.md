@@ -8,6 +8,8 @@
 
 ## TASKS
 
+[x]没有必要对存活的实例做上限数量限制
+[x]检测npm插件新版本，每天一次异步检查，CLI输出中附带更新提示（修复semver比较bug）
 [x]Console Bridge：生成可粘贴到任意浏览器控制台执行的 JS 脚本，建立 SSE 连接到 dev server，支持跨域（CORS 自动开启）。`pilot bridge` 命令输出脚本，`.pilot/bridge.js` 自动生成。console: 前缀实例与 Vite 注入的 tab 隔离，跳过版本检查和 reload（防止注入代码丢失）。
 [x]要不还是换个思路吧，咱们配置一个项目级的插件，然后在用户输入提示词的时候，将之前通过网页发送过来的指令叠在一起发出去，你看这作为一种claude Channel不能使用的降级方案的话有可行性没有？
 [x]claude Channel 是需要帐号在研究预览列表中才能使用，这个目前还是不方便使用，我觉得可以探索一下  https://code.claude.com/docs/en/remote-control#enable-remote-control-for-all-sessions
@@ -19,7 +21,7 @@
 
 ## 已完成的工作
 
-- 实例目录自动清理：过期 5 分钟的实例自动删除目录，实例数量上限 20
+- 实例目录自动清理：过期 5 分钟的实例自动删除目录（无数量上限）
 - CLI 实例不活跃时输出警告和可用实例列表
 - Alt+Click 元素后弹出输入框+复制按钮，生成包含元素信息的提示词供 agent 使用
 - 修复 WSL2 环境下 referer 缺失导致 active-instance.json 不写入的问题
@@ -31,3 +33,4 @@
 - Channel Server 降级方案：UserPromptSubmit hook 自动附加浏览器消息到用户下次输入（无需 Channels API）
 - CLI HTTP 优先模式：`pilot run/page/logs` 优先通过 HTTP API 通信（~10-50ms），HTTP 不可用时自动 fallback 到文件通道
 - SSE 心跳：服务端每 30s 发送 ping 事件，防止代理/防火墙静默断开空闲连接
+- npm 版本检查：CLI 每天一次异步检查新版本，有更新时输出提示（3s 超时，非阻塞）

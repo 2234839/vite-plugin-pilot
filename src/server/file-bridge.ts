@@ -8,6 +8,7 @@ interface InstanceInfo {
   path: string
   label: string
   lastSeen: number
+  title: string
 }
 
 /**
@@ -91,10 +92,11 @@ export class FileBridge {
   }
 
   /** 注册/更新实例信息（每次 SSE 连接时调用），同时清理过期实例 */
-  writeActiveInstance(instanceId: string, urlPath: string) {
+  writeActiveInstance(instanceId: string, urlPath: string, title?: string) {
     const map = this.readActiveInstance()
     const label = FileBridge.toInstanceId(urlPath)
-    map[instanceId] = { path: urlPath, label, lastSeen: Date.now() }
+    const existing = map[instanceId]
+    map[instanceId] = { path: urlPath, label, lastSeen: Date.now(), title: title || existing?.title }
 
     /** 清理超过 5 分钟未活跃的实例目录（保留活跃实例，不限制数量） */
     const staleThreshold = Date.now() - 5 * 60 * 1000
@@ -107,6 +109,15 @@ export class FileBridge {
     }
 
     writeFileSync(resolve(this.pilotDir, PILOT_FILES.activeInstance), JSON.stringify(map, null, 2), 'utf-8')
+  }
+
+  /** 仅更新实例的 title（SPA 场景下 title 可能动态变化，POST /result 时调用） */
+  updateInstanceTitle(instanceId: string, title: string) {
+    const map = this.readActiveInstance()
+    if (map[instanceId]) {
+      map[instanceId].title = title
+      writeFileSync(resolve(this.pilotDir, PILOT_FILES.activeInstance), JSON.stringify(map, null, 2), 'utf-8')
+    }
   }
 
   /** 获取最近活跃的实例 ID（没有指定时自动选择用户最后操作的 tab） */

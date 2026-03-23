@@ -6,6 +6,7 @@ import { FileBridge } from './file-bridge'
 import { generateElementPrompt } from '../prompt/generator'
 import { getCompactText } from './compact'
 import { buildBridgeScript } from './bridge'
+import { buildUserscript } from './userscript'
 
 /** 等待者类型，决定 POST /result handler 的响应格式 */
 type WaiterType = 'default' | 'run' | 'page' | 'snapshot'
@@ -135,6 +136,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         const url = new URL(req.url, 'http://localhost')
         const sseInstance = url.searchParams.get('instance') || instanceId
         const clientVersion = url.searchParams.get('version')
+        const pageTitle = url.searchParams.get('title') || ''
 
         lastBrowserActivity[sseInstance] = Date.now()
 
@@ -147,7 +149,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
             urlPath = urlObj.pathname
           } catch { /* ignore */ }
         }
-        bridge.writeActiveInstance(sseInstance, urlPath)
+        bridge.writeActiveInstance(sseInstance, urlPath, pageTitle)
 
         /** 版本不匹配时立即返回 reload 指令然后关闭连接
          *  Console Bridge 实例（console: 前缀）跳过版本检查（无法 reload，会丢失注入代码） */
@@ -242,6 +244,11 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       /** ---------- POST /__pilot/result ---------- */
       if (endpoint === PILOT_ENDPOINTS.result && req.method === 'POST') {
         lastBrowserActivity[instanceId] = Date.now()
+        /** POST /result 时同步更新 title（SPA 场景下 title 可能动态变化） */
+        const clientTitle = (req.headers['x-pilot-title'] as string) || ''
+        if (clientTitle) {
+          bridge.updateInstanceTitle(instanceId, clientTitle)
+        }
         handlePost<ExecResult>(req, res, (result) => {
           /** 分离 snapshot，生成 compact 文本后附加到 result 中 */
           const clientSnapshot = result.snapshot
@@ -293,20 +300,20 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
                 /** 过滤 undefined 返回值（链式操作最后一个 __pilot_wait 的返回值），减少 CLI 噪音 */
                 const raw = result.result != null ? String(result.result) : ''
                 output = raw === 'undefined' ? '' : raw
-                if (wOpts.withPage && result.snapshotText) {
-                  output += '\n---\n' + result.snapshotText
-                }
                 if (wOpts.withLogs && result.logs && result.logs.length > 0) {
-                  output += '\n---\n' + result.logs.join('\n')
+                  output += '\n--- logs ---\n' + result.logs.join('\n')
+                }
+                if (wOpts.withPage && result.snapshotText) {
+                  output += '\n--- page snapshot ---\n' + result.snapshotText
                 }
               } else {
                 output = `ERROR: ${result.error || 'unknown'}`
                 /** 失败时也附带日志和 snapshot（?page=1 ?logs=1），帮助 agent 一次 tool call 完成调试 */
                 if (wOpts.withLogs && result.logs && result.logs.length > 0) {
-                  output += '\n---\n' + result.logs.join('\n')
+                  output += '\n--- logs ---\n' + result.logs.join('\n')
                 }
                 if (wOpts.withPage && result.snapshotText) {
-                  output += '\n---\n' + result.snapshotText
+                  output += '\n--- page snapshot ---\n' + result.snapshotText
                 }
               }
               wRes.writeHead(200, { 'Content-Type': 'text/plain' })
@@ -510,6 +517,51 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           'Cache-Control': 'no-cache',
         })
         res.end(bridgeScript)
+        return
+      }
+
+      /** ---------- GET /__pilot/userscript.js (Tampermonkey Userscript) ----------
+       *  返回完整的 Tampermonkey/Greasemonkey 兼容脚本
+       *  用户安装后自动在所有页面运行，用 GM_xmlhttpRequest 轮询接收代码 */
+      if (endpoint === '/__pilot/userscript.js' && req.method === 'GET') {
+        const host = req.headers.host || 'localhost'
+        const serverOrigin = `http://${host}`
+        const script = buildUserscript(options, pilotVersion || String(Date.now()), serverOrigin)
+        res.writeHead(200, {
+          'Content-Type': 'text/javascript',
+          'Cache-Control': 'no-cache',
+        })
+        res.end(script)
+        return
+      }
+
+      /** ---------- GET /__pilot/has-code (Userscript 轮询端点) ----------
+       *  返回 pending.js 中的待执行代码（读取并删除，消费语义） */
+      if (endpoint === '/__pilot/has-code' && req.method === 'GET') {
+        const code = bridge.readPendingJs(instanceId)
+        if (code) {
+          bridge.clearExecResult(instanceId)
+          bridge.clearExecDone(instanceId)
+          lastBrowserActivity[instanceId] = Date.now()
+          res.writeHead(200, { 'Content-Type': 'text/plain' })
+          res.end(code)
+        } else {
+          res.writeHead(204)
+          res.end()
+        }
+        return
+      }
+
+      /** ---------- GET /__pilot/register (Userscript 实例注册) ----------
+       *  userscript 启动时注册实例信息，供 CLI status 查看和实例选择 */
+      if (endpoint === '/__pilot/register' && req.method === 'GET') {
+        const url = new URL(req.url, 'http://localhost')
+        const pagePath = url.searchParams.get('path') || '/'
+        const pageTitle = url.searchParams.get('title') || ''
+        bridge.writeActiveInstance(instanceId, pagePath, pageTitle)
+        lastBrowserActivity[instanceId] = Date.now()
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        res.end('ok')
         return
       }
 

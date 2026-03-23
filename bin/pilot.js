@@ -262,20 +262,18 @@ function parseArgs(args) {
  */
 function buildInstanceHint(activeData, currentInstanceId) {
   const recentThreshold = Date.now() - INSTANCE_ACTIVE_THRESHOLD * 1000
-  const seenLabels = {}
+  const now = Date.now()
   const recent = Object.entries(activeData)
     .filter(([, info]) => info.lastSeen >= recentThreshold)
     .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
-    .filter(([, info]) => {
-      if (seenLabels[info.label]) return false
-      seenLabels[info.label] = true
-      return true
-    })
     .map(([id, info]) => {
       const isCurrent = id === currentInstanceId ? '← ' : '  '
       /** console: 前缀实例显示完整 ID，普通实例显示前 8 位 */
       const displayId = id.startsWith('console:') ? id : id.slice(0, 8)
-      return `${isCurrent}${displayId} (${info.label})`
+      const title = info.title ? ` [${info.title}]` : ''
+      const agoSec = Math.round((now - info.lastSeen) / 1000)
+      const agoStr = agoSec < 60 ? `${agoSec}s` : `${Math.round(agoSec / 60)}m`
+      return `${isCurrent}${displayId} (${info.label}${title}) ${agoStr} ago`
     })
 
   if (recent.length <= 1) return ''
@@ -316,13 +314,27 @@ function checkNpmUpdate(pilotDir) {
 }
 
 /**
+ * 比较两个 semver 版本号，返回 latest > current 时为 true
+ * 用数字比较替代字符串比较，避免 "0.10.0" > "0.9.0" 返回 false 的 bug
+ */
+function isNewerVersion(latest, current) {
+  const l = latest.split('.').map(Number)
+  const c = current.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    if ((l[i] || 0) > (c[i] || 0)) return true
+    if ((l[i] || 0) < (c[i] || 0)) return false
+  }
+  return false
+}
+
+/**
  * 构建新版本提示（从缓存文件读取，有新版本时返回提示文本）
  */
 function buildUpdateHint(pilotDir) {
   const checkFile = join(pilotDir, 'npm-check.json')
   try {
     const cached = JSON.parse(readFileSync(checkFile, 'utf-8'))
-    if (cached.latest && cached.latest > CURRENT_VERSION) {
+    if (cached.latest && isNewerVersion(cached.latest, CURRENT_VERSION)) {
       return `\n--- update ---\nNew version: vite-plugin-pilot@${cached.latest} (current: ${CURRENT_VERSION})\nnpx npm i -g vite-plugin-pilot`
     }
   } catch { /* ignore */ }
@@ -365,7 +377,8 @@ async function main() {
       .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
       .map(([id, info]) => {
         const displayId = id.startsWith('console:') ? id : id.slice(0, 8)
-        return `  ${displayId} (${info.label})`
+        const title = info.title ? ` [${info.title}]` : ''
+        return `  ${displayId} (${info.label}${title})`
       })
     if (available.length > 0) {
       const currentDisplay = instanceId.startsWith('console:') ? instanceId : instanceId.slice(0, 8)
@@ -433,12 +446,12 @@ async function main() {
 
       if (showLogs) {
         const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
-        if (logs) output += '\n---\n' + logs
+        if (logs) output += '\n--- logs ---\n' + logs
       }
       if (showPage) {
         const execResult = readJsonSafe(join(instanceDir, 'exec-result.json'))
         const snapshot = execResult?.snapshotText || readFileSafe(join(instanceDir, PILOT_FILES.compactSnapshot))
-        if (snapshot) output += '\n---\n' + snapshot
+        if (snapshot) output += '\n--- page snapshot ---\n' + snapshot
       }
 
       console.log(output + buildHints(pilotDir, activeData, instanceId))
@@ -523,19 +536,18 @@ async function main() {
 
       const activeFile = join(pilotDir, 'active-instance.json')
       const activeData = readJsonSafe(activeFile) || {}
-      /** 只显示最近活跃的实例，每个 label 只显示最近一个（避免同页面多 tab 重复） */
+      /** 只显示最近活跃的实例（按 lastSeen 降序） */
       const recentThreshold = Date.now() - INSTANCE_ACTIVE_THRESHOLD * 1000
-      const seenLabels = {}
+      const now = Date.now()
       const instanceDetails = Object.entries(activeData)
         .filter(([, info]) => info.lastSeen > recentThreshold)
         .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
-        .filter(([, info]) => {
-          if (seenLabels[info.label]) return false
-          seenLabels[info.label] = true
-          return true
-        })
         .map(([id, info]) => {
-          return `${id.slice(0, 8)} (${info.label})`
+          const title = info.title ? ` [${info.title}]` : ''
+          /** 活跃时间距现在的秒数 */
+          const agoSec = Math.round((now - info.lastSeen) / 1000)
+          const agoStr = agoSec < 60 ? `${agoSec}s ago` : `${Math.round(agoSec / 60)}m ago`
+          return { id: id.slice(0, 8), label: info.label, title: info.title || '', lastSeen: agoStr }
         })
       const instanceDir = getInstanceDir(pilotDir, instanceId)
       const hasSnapshot = existsSync(join(instanceDir, PILOT_FILES.compactSnapshot))
@@ -573,6 +585,26 @@ async function main() {
       break
     }
 
+    case 'userscript': {
+      if (!pilotDir) {
+        console.error('ERROR: 未找到 .pilot 目录，请先启动 dev server')
+        process.exit(1)
+      }
+      const port = getServerPort(pilotDir)
+      if (!port) {
+        console.error('ERROR: 未找到 port.txt，请先启动 dev server')
+        process.exit(1)
+      }
+      const result = await httpGet('/__pilot/userscript.js', port, 'userscript:dummy', 5000)
+      if (result && result.status === 200) {
+        console.log(result.body)
+      } else {
+        console.error('ERROR: 无法获取 userscript.js，请确认 dev server 正在运行')
+        process.exit(1)
+      }
+      break
+    }
+
     case 'help':
     default:
       console.log(`pilot — vite-plugin-pilot CLI (HTTP 优先，文件通道 fallback)
@@ -585,6 +617,7 @@ async function main() {
   logs [instance:xxx]                           最近一次 exec 的控制台日志
   status                                        文件系统状态诊断
   bridge                                        输出 Console Bridge 脚本（粘贴到任意浏览器控制台）
+  userscript                                    输出 Tampermonkey 脚本（安装后自动在所有页面运行）
   help                                          显示此帮助信息
 
 实例选择: instance:xxxxxxxx 或环境变量 PILOT_INSTANCE
