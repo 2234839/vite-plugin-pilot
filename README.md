@@ -20,7 +20,7 @@ Let AI agents (Claude Code, Cursor, etc.) **see, interact with, and verify** bro
 - **Zero Config** — Drop-in Vite plugin, works with any Vite project (Vue, React, vanilla JS, etc.)
 - **Standalone Server** — `npx pilot server` works without Vite, connects to any webpage
 - **Compact Snapshot** — Page state serialized into ~80 lines of text, optimized for LLM context windows
-- **Multi-Instance** — Each browser tab is independently tracked, switch freely with `PILOT_INSTANCE`
+- **Multi-Instance** — Each browser tab is independently tracked, switch freely with `instance:xxx` (supports prefix matching) or `PILOT_INSTANCE`
 - **Instance Persistence** — Page refreshes reuse the same instance ID, no stale instance buildup
 - **Auto Reload** — Browser auto-refreshes when dev server restarts
 - **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility

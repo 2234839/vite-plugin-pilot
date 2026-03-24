@@ -9,13 +9,23 @@ description: 通过 vite-plugin-pilot 在浏览器中测试页面。当需要查
 
 ## 首次配置（仅初次安装时执行）
 
+### Vite 插件模式
 1. 确认 vite-plugin-pilot 已安装：检查 package.json 是否包含 `vite-plugin-pilot`，如果没有则执行 `pnpm add -D vite-plugin-pilot`，并确认 vite.config.ts 的 plugins 数组中包含 `pilot()`
 2. **语言环境检测**：分析项目语言环境，在 vite.config.ts 中配置 `pilot({ locale: 'zh' })` 或 `pilot({ locale: 'en' })`。判断依据：项目中的 UI 文本、README 语言、i18n 配置等。已有 `pilot({...})` 配置时只追加 `locale` 字段，不覆盖其他配置。默认 `zh`
-3. 确认 `.pilot` 已添加到 `.gitignore`（运行时数据目录，不应提交）
+3. **更新检查配置**：询问用户是否需要 CLI 自动检查 npm 新版本（默认开启）。如用户选择关闭，在 vite.config.ts 中配置 `pilot({ checkUpdate: false })`。已有 `pilot({...})` 配置时只追加 `checkUpdate` 字段
+4. 确认 `.pilot` 已添加到 `.gitignore`（运行时数据目录，不应提交）
+
+### 独立 Server 模式（不依赖 Vite）
+1. 运行 `npx pilot server` 启动独立 HTTP server
+2. 浏览器连接方式（任选一种）：
+   - 复制 `.pilot/bridge.js` 内容到目标浏览器控制台执行
+   - 安装 `.pilot/userscript.user.js` 到 Tampermonkey（自动在所有页面运行）
+3. 连接后即可使用下方工作流中的所有命令
 
 ## 每次使用前检查
 
-- 确认 dev server 已启动（检查是否有进程监听 vite 端口）
+- Vite 插件模式：确认 dev server 已启动（检查是否有进程监听 vite 端口）
+- 独立 Server 模式：确认 `npx pilot server` 已运行，浏览器已连接
 
 ## 工作流
 
@@ -24,15 +34,18 @@ npx pilot page                    # 查看页面状态（compact snapshot）
 npx pilot run 'code'              # 执行 JS + 结果 + 日志 + 页面快照（默认全附带）
 npx pilot run 'code' nopage       # 执行 JS + 结果 + 日志（不附带页面快照）
 npx pilot run 'code' nologs       # 执行 JS + 结果 + 页面快照（不附带日志）
-npx pilot run 'code' instance:xxx # 指定目标实例执行
+npx pilot run 'code' instance:abc # 指定目标实例（支持前缀模糊匹配）
 npx pilot logs                    # 查看最近控制台日志
-npx pilot status                  # 列出已连接的浏览器 tab
+npx pilot status                  # 列出已连接的实例（含 type、url、title）
+npx pilot server [port]           # 启动独立 HTTP server（不依赖 Vite）
+npx pilot bridge                  # 输出 Console Bridge 脚本
+npx pilot userscript              # 输出 Tampermonkey Userscript
 npx pilot help                    # 查看辅助函数列表
 ```
 
 **使用模式**：`run 'code'` 默认返回结果+日志+页面快照，一步即可看到完整信息。`page` 单独查看 compact snapshot。
 
-**实例选择**：多个浏览器 tab 打开时，执行结果末尾会显示可用实例列表（`--- instances ---`），用 `←` 标记当前实例。切换实例用 `instance:xxxxxxxx` 参数或 `PILOT_INSTANCE` 环境变量。
+**实例选择**：多个浏览器 tab 打开时，执行结果末尾会显示可用实例列表（`--- instances ---`），用 `←` 标记当前实例。每个实例有 type 标识（`[vite]` / `[console]` / `[userscript]`）、hostname label 和页面 title。切换实例用 `instance:xxx` 参数（支持前缀模糊匹配，如 `instance:1316` 匹配 `131646c7`）或 `PILOT_INSTANCE` 环境变量。`npx pilot status` 查看所有实例详情（含 type、url、title、lastSeen）。
 
 ## 辅助函数
 
