@@ -164,6 +164,15 @@ export class FileBridge {
     return code
   }
 
+  /** 只读待执行代码，不删除（供 SSE fs.watch 检查使用，避免和 polling 端点竞争） */
+  peekPendingJs(instanceId: string): string | null {
+    this.ensureInstanceDir(instanceId)
+    const file = join(this.getInstanceDir(instanceId), PILOT_FILES.pendingJs)
+    if (!existsSync(file)) return null
+
+    return readFileSync(file, 'utf-8').trim()
+  }
+
   /** 写入待执行的 JS 代码（文件驱动通道），同时清除旧的 exec-done 标记 */
   writePendingJs(code: string, instanceId: string) {
     this.ensureInstanceDir(instanceId)

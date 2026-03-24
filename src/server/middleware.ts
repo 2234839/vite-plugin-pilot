@@ -237,9 +237,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         /** 用 fs.watch 监听实例目录变化，CLI 写入 pending.js 时即时推送
          *  失败时 fallback 到 1s setInterval 轮询（网络文件系统、Docker 挂载等场景） */
         const instanceDir = bridge.getInstanceDir(sseInstance)
-        /** 检查并推送 pending.js 代码的公共逻辑 */
+        /** 检查并推送 pending.js 代码的公共逻辑（peek 不删除，留给 polling 端点消费） */
         const checkAndBroadcast = () => {
-          const fileCode = bridge.readPendingJs(sseInstance)
+          const fileCode = bridge.peekPendingJs(sseInstance)
           if (!fileCode) return
           bridge.clearExecResult(sseInstance)
           bridge.clearExecDone(sseInstance)
