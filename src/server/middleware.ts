@@ -45,6 +45,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   /** 向指定实例的所有 SSE 连接广播代码 */
   function broadcastCode(instanceId: string, code: string): void {
     const connections = sseConnections[instanceId]
+    console.log(`[Pilot] broadcastCode instance=${instanceId} conns=${connections?.length ?? 0}`)
     if (!connections || connections.length === 0) return
     for (const res of connections) {
       res.write(`event: code\ndata: ${code}\n\n`)
@@ -53,6 +54,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
   /** 通过 SSE 广播代码给浏览器（同时写 pending.js 供轮询 fallback 使用） */
   function dispatchCode(instanceId: string, code: string): void {
+    const preview = code.slice(0, 40).replace(/\n/g, ' ')
+    console.log(`[Pilot] dispatchCode instance=${instanceId} code="${preview}" sseConns=${sseConnections[instanceId]?.length ?? 0}`)
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
@@ -290,6 +293,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
       /** ---------- POST /__pilot/result ---------- */
       if (endpoint === PILOT_ENDPOINTS.result && req.method === 'POST') {
+        console.log(`[Pilot] POST /result instance=${instanceId} waiters=${execWaiters[instanceId]?.length ?? 0}`)
         lastBrowserActivity[instanceId] = Date.now()
         /** POST /result 时同步更新 title（SPA 场景下 title 可能动态变化） */
         const clientTitle = (req.headers['x-pilot-title'] as string) || ''
