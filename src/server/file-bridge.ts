@@ -3,12 +3,16 @@ import { resolve, join } from 'path'
 import type { ResolvedPilotOptions, ExecResult, ElementInfo } from '../types'
 import { PILOT_FILES } from '../constants'
 
+/** 实例运行环境类型 */
+export type InstanceType = 'vite' | 'console' | 'userscript'
+
 /** 实例注册信息 */
-interface InstanceInfo {
+export interface InstanceInfo {
   path: string
   label: string
   lastSeen: number
   title: string
+  type: InstanceType
 }
 
 /**
@@ -30,6 +34,12 @@ export class FileBridge {
       mkdirSync(this.pilotDir, { recursive: true })
     }
 
+    /** 启动时清理旧的活跃实例记录（浏览器 tab 会重新连接创建新记录） */
+    const activeFile = resolve(this.pilotDir, PILOT_FILES.activeInstance)
+    if (existsSync(activeFile)) {
+      writeFileSync(activeFile, '{}', 'utf-8')
+    }
+
     const instancesDir = this.getInstancesDir()
     if (existsSync(instancesDir)) {
       /** 启动时清理所有旧实例目录（浏览器 tab 会重新连接创建新实例） */
@@ -38,12 +48,6 @@ export class FileBridge {
       }
     } else {
       mkdirSync(instancesDir, { recursive: true })
-    }
-
-    /** 清理旧的实例注册信息 */
-    const activeFile = resolve(this.pilotDir, PILOT_FILES.activeInstance)
-    if (existsSync(activeFile)) {
-      unlinkSync(activeFile)
     }
   }
 
@@ -71,6 +75,17 @@ export class FileBridge {
     return cleaned || PILOT_FILES.defaultInstance
   }
 
+  /** 从 URL 生成简短标签（hostname 或 pathname） */
+  static toLabel(fullUrl: string): string {
+    if (!fullUrl || fullUrl === '/') return PILOT_FILES.defaultInstance
+    try {
+      const urlObj = new URL(fullUrl)
+      if (urlObj.hostname && urlObj.hostname !== 'localhost') return urlObj.hostname
+    } catch { /* 非 URL 格式，fallback 到 pathname 处理 */ }
+    const cleaned = fullUrl.replace(/^\/+|\/+$/g, '')
+    return cleaned || PILOT_FILES.defaultInstance
+  }
+
   /** 确保实例目录存在（供 fs.watch 使用，需要目录提前存在） */
   ensureInstanceDir(instanceId: string) {
     const dir = this.getInstanceDir(instanceId)
@@ -91,12 +106,16 @@ export class FileBridge {
     }
   }
 
-  /** 注册/更新实例信息（每次 SSE 连接时调用），同时清理过期实例 */
-  writeActiveInstance(instanceId: string, urlPath: string, title?: string) {
+  /** 注册/更新实例信息（path/label 只在有实际值时写入，heartbeat 的 '/' 不覆盖） */
+  writeActiveInstance(instanceId: string, fullUrl: string, type: InstanceType = 'vite', title?: string) {
     const map = this.readActiveInstance()
-    const label = FileBridge.toInstanceId(urlPath)
     const existing = map[instanceId]
-    map[instanceId] = { path: urlPath, label, lastSeen: Date.now(), title: title || existing?.title }
+    /** path/label：fullUrl 为 '/' 时不覆盖已有值（SSE heartbeat 跨域无 referer） */
+    const hasRealUrl = fullUrl && fullUrl !== '/'
+    const path = hasRealUrl ? fullUrl : (existing?.path || '/')
+    const label = hasRealUrl ? FileBridge.toLabel(fullUrl) : (existing?.label || FileBridge.toLabel(fullUrl))
+    const currentType = existing?.type || type
+    map[instanceId] = { path, label, lastSeen: Date.now(), title: title || existing?.title, type: currentType }
 
     /** 清理超过 5 分钟未活跃的实例目录（保留活跃实例，不限制数量） */
     const staleThreshold = Date.now() - 5 * 60 * 1000

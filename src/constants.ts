@@ -58,4 +58,6 @@ export const DEFAULT_OPTIONS = {
   inspector: true,
   /** 语言环境，默认中文 */
   locale: 'zh',
+  /** 是否检查 npm 新版本，默认开启 */
+  checkUpdate: true,
 } as const

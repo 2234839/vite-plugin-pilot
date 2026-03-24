@@ -41,6 +41,7 @@ function replacePlaceholders(code: string, options: ResolvedPilotOptions, pilotV
     .replace(/__LOCALE_POSITION__/g, '')
     .replace(/__LOCALE_TEXT_CONTENT__/g, '')
     .replace(/__LOCALE_STYLE__/g, '')
+    .replace(/__PILOT_INSTANCE_TYPE__/g, "'userscript'")
 }
 
 /** userscript 专用的通信层：优先 SSE（EventSource），fallback 到 GM_xmlhttpRequest 轮询 */
@@ -188,40 +189,16 @@ const userscriptClientCode = `
     return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
   }
 
-  /** 优先使用 fetch 发送结果（同源时可用），fallback 到 GM_xmlhttpRequest */
-  function postResult(result) {
+  /** 发送结果：GM_xmlhttpRequest POST */
+  function sendResult(result) {
     var payload = JSON.stringify(result);
-    var headers = {
-      'Content-Type': 'application/json',
-      'X-Pilot-Instance': window.__pilot_instanceId,
-      'X-Pilot-Title': document.title || ''
-    };
-    try {
-      fetch(serverOrigin + '/__pilot/result', {
-        method: 'POST',
-        headers: headers,
-        body: payload
-      }).catch(function() {
-        gmPost(payload, headers);
-      });
-    } catch(e) {
-      gmPost(payload, headers);
-    }
-  }
-
-  /** GM_xmlhttpRequest fallback（跨域或 CSP 限制时使用） */
-  function gmPost(payload, headers) {
-    if (typeof GM_xmlhttpRequest === 'undefined') return;
     GM_xmlhttpRequest({
       method: 'POST',
-      url: serverOrigin + '/__pilot/result',
-      headers: headers,
-      data: payload
+      url: serverOrigin + '/__pilot/result?instance=' + unsafeWindow.__pilot_instanceId,
+      headers: { 'Content-Type': 'application/json' },
+      data: payload,
+      timeout: 10000
     });
-  }
-
-  function sendResult(result) {
-    postResult(result);
   }
 
   var isExecuting = false;
@@ -233,32 +210,28 @@ const userscriptClientCode = `
       return;
     }
     isExecuting = true;
-    var result = execCode(code);
-    function sendWithSnapshot(result) {
-      if (window.__pilot_snapshot && !document.hidden) {
-        requestAnimationFrame(function() {
-          if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+    try {
+      var result = execCode(code);
+
+      /** 立即发送结果（不等待 snapshot），确保结果不会因 rAF/snapshot 问题丢失 */
+      function doSend(result) {
+        try {
           sendResult(result);
-          isExecuting = false;
-          if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
-        });
-      } else if (window.__pilot_snapshot) {
-        setTimeout(function() {
-          if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
-          sendResult(result);
-          isExecuting = false;
-          if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
-        }, 50);
-      } else {
-        sendResult(result);
+        } catch(e) {
+          console.error('[Pilot] sendResult error:', e);
+        }
         isExecuting = false;
         if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
       }
-    }
-    if (result && typeof result.then === 'function') {
-      result.then(function(r) { sendWithSnapshot(r); });
-    } else {
-      sendWithSnapshot(result);
+
+      if (result && typeof result.then === 'function') {
+        result.then(function(r) { doSend(r); });
+      } else {
+        doSend(result);
+      }
+    } catch(e) {
+      console.error('[Pilot] handleCode error:', e);
+      isExecuting = false;
     }
   }
 
@@ -267,14 +240,17 @@ const userscriptClientCode = `
 
   function connectSSE() {
     try {
-      var es = new EventSource(serverOrigin + '/__pilot/sse?instance=' + window.__pilot_instanceId + '&version=' + __PILOT_VERSION__ + '&title=' + encodeURIComponent(document.title || ''));
+      var es = new EventSource(serverOrigin + '/__pilot/sse?instance=' + window.__pilot_instanceId + '&version=' + __PILOT_VERSION__ + '&title=' + encodeURIComponent(document.title || '') + '&type=userscript' + '&path=' + encodeURIComponent(location.href));
       window.__pilot_es = es;
       es.addEventListener('code', function(e) {
         if (myGen !== window.__pilot_gen) return;
         handleCode(e.data);
       });
       es.addEventListener('ping', function() {
-        sseConnected = true;
+        if (!sseConnected) {
+          sseConnected = true;
+          stopPolling();
+        }
       });
       es.addEventListener('reload', function() {
         /** Userscript 模式下不 reload（注入代码会丢失） */
@@ -288,7 +264,6 @@ const userscriptClientCode = `
         setTimeout(function() { connectSSE(); }, 5000);
         startPolling();
       };
-      console.log('[Pilot] SSE connecting...');
     } catch(e) {
       startPolling();
     }
@@ -298,9 +273,16 @@ const userscriptClientCode = `
   var pollTimer = null;
   function startPolling() {
     if (pollTimer) return;
-    console.log('[Pilot] SSE unavailable, fallback to polling');
+    console.log('[Pilot] Polling started (SSE fallback)');
     pollCode();
     pollTimer = setInterval(pollCode, 2000);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   }
 
   function pollCode() {
@@ -319,22 +301,19 @@ const userscriptClientCode = `
 
   /** 向服务端注册实例 */
   function registerInstance() {
-    var registerUrl = serverOrigin + '/__pilot/register?instance=' + window.__pilot_instanceId + '&path=' + encodeURIComponent(location.pathname) + '&title=' + encodeURIComponent(document.title);
-    try {
-      fetch(registerUrl).catch(function() {
-        if (typeof GM_xmlhttpRequest !== 'undefined') {
-          GM_xmlhttpRequest({ method: 'GET', url: registerUrl });
-        }
-      });
-    } catch(e) {
-      if (typeof GM_xmlhttpRequest !== 'undefined') {
-        GM_xmlhttpRequest({ method: 'GET', url: registerUrl });
-      }
+    var registerUrl = serverOrigin + '/__pilot/register?instance=' + window.__pilot_instanceId + '&path=' + encodeURIComponent(location.href) + '&title=' + encodeURIComponent(document.title) + '&type=userscript';
+    if (typeof GM_xmlhttpRequest !== 'undefined') {
+      GM_xmlhttpRequest({ method: 'GET', url: registerUrl });
+    } else {
+      try { fetch(registerUrl).catch(function() {}); } catch(e) {}
     }
   }
 
   registerInstance();
   console.log('[Pilot] Userscript started (gen=' + myGen + ', instance=' + window.__pilot_instanceId + ')');
+
+  /** 先启动轮询作为保底（SSE 跨域时可能静默失败），SSE ping 成功后自动停止轮询 */
+  startPolling();
   connectSSE();
 })();
 `
@@ -346,8 +325,16 @@ export function buildUserscript(options: ResolvedPilotOptions, pilotVersion: str
     { name: 'Page Snapshot', code: replacePlaceholders(snapshotCode, options, pilotVersion) },
   ]
 
+  /** userscript 在 Tampermonkey 沙箱中运行，window 是代理对象
+   *  (0, eval)() 在页面全局执行，访问不到沙箱 window 上的 __pilot_*
+   *  因此把 window.__pilot_* 和 window.__PILOT_* 替换为 unsafeWindow.__pilot_* / unsafeWindow.__PILOT_* */
   const body = modules
-    .map(({ name, code }) => `  /* === ${name} === */\n  ${code.trim()}`)
+    .map(({ name, code }) => {
+      const patched = code
+        .replace(/window\.__pilot_/g, 'unsafeWindow.__pilot_')
+        .replace(/window\.__PILOT_/g, 'unsafeWindow.__PILOT_')
+      return `  /* === ${name} === */\n  ${patched.trim()}`
+    })
     .join('\n\n')
 
   return `// ==UserScript==
@@ -358,6 +345,7 @@ export function buildUserscript(options: ResolvedPilotOptions, pilotVersion: str
 // @author       2234839
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      localhost
 // @connect      127.0.0.1
 // @run-at       document-idle
@@ -366,23 +354,25 @@ export function buildUserscript(options: ResolvedPilotOptions, pilotVersion: str
 // [Pilot] Tampermonkey Userscript — 安装到油猴后自动在所有页面运行
 // 修改下方 SERVER_ORIGIN 指向你的 dev server 地址
 (function() {
-  if (window.__pilot_userscript_active) return;
-  window.__pilot_userscript_active = true;
+  /** 跳过 iframe（只连接顶层页面，避免 iframe 嵌套注册大量无用实例） */
+  if (window.self !== window.top) return;
+  if (unsafeWindow.__pilot_userscript_active) return;
+  unsafeWindow.__pilot_userscript_active = true;
 
   /** ==================== 配置 ==================== */
   /** dev server 地址，按需修改 */
   var SERVER_ORIGIN = "${serverOrigin}";
-  window.__PILOT_SERVER_ORIGIN__ = SERVER_ORIGIN;
-  window.__pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || ("userscript:" + Math.random().toString(16).slice(2, 10));
-  sessionStorage.setItem('__pilot_instanceId', window.__pilot_instanceId);
+  unsafeWindow.__PILOT_SERVER_ORIGIN__ = SERVER_ORIGIN;
+  unsafeWindow.__pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || Math.random().toString(16).slice(2, 10);
+  sessionStorage.setItem('__pilot_instanceId', unsafeWindow.__pilot_instanceId);
   var __PILOT_VERSION__ = "${pilotVersion}";
   /** ==================== 配置结束 ==================== */
 
-  console.log("[Pilot] Userscript starting... (instance: " + window.__pilot_instanceId + ")");
+  console.log("[Pilot] Userscript starting... (instance: " + unsafeWindow.__pilot_instanceId + ")");
   console.log("[Pilot] Server: " + SERVER_ORIGIN);
 
 ${body}
 
-  console.log("[Pilot] Userscript ready! Use: npx pilot run 'your code' (PILOT_INSTANCE=" + window.__pilot_instanceId + ")");
+  console.log("[Pilot] Userscript ready! Use: npx pilot run 'your code' (PILOT_INSTANCE=" + unsafeWindow.__pilot_instanceId + ")");
 })();`
 }

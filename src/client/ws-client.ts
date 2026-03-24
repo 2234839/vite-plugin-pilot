@@ -213,9 +213,13 @@ export const wsClientCode = `
     /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
      *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
     function sendWithSnapshot(result) {
+      /** 安全采集 snapshot，出错时不阻塞结果发送 */
+      function safeSnapshot() {
+        try { return window.__pilot_snapshot ? window.__pilot_snapshot() : undefined; } catch(e) { return undefined; }
+      }
       if (window.__pilot_snapshot && !document.hidden) {
         requestAnimationFrame(function() {
-          if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+          result.snapshot = safeSnapshot();
           sendResult(result);
           /** exec 完成，检查是否有排队的代码需要执行 */
           isExecuting = false;
@@ -224,7 +228,7 @@ export const wsClientCode = `
       } else if (window.__pilot_snapshot) {
         /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
         setTimeout(function() {
-          if (window.__pilot_snapshot) result.snapshot = window.__pilot_snapshot();
+          result.snapshot = safeSnapshot();
           sendResult(result);
           isExecuting = false;
           if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
@@ -246,7 +250,8 @@ export const wsClientCode = `
   /** 通过 SSE 接收代码推送，替代 HTTP 轮询 */
   function connectSSE() {
     var titleParam = encodeURIComponent(document.title || '');
-    var url = apiUrl('/__pilot/sse?instance=' + __pilot_instanceId + '&version=' + __PILOT_VERSION__ + '&title=' + titleParam);
+    var typeParam = typeof __PILOT_INSTANCE_TYPE__ !== 'undefined' ? ('&type=' + __PILOT_INSTANCE_TYPE__) : '';
+    var url = apiUrl('/__pilot/sse?instance=' + __pilot_instanceId + '&version=' + __PILOT_VERSION__ + '&title=' + titleParam + typeParam);
     var es = new EventSource(url);
     window.__pilot_es = es;
 

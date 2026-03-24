@@ -10,7 +10,7 @@ import { snapshotCode } from '../client/snapshot'
  *
  * 与 inject.ts 的区别：
  * - 不依赖 Vite HMR，独立运行
- * - 使用 console: 前缀的 instance ID，与 Vite 注入的 tab 区分
+ * - 使用 type 字段标识运行环境，与 Vite 注入的 tab 区分
  * - 包含完整的 log-collector + snapshot + ws-client 逻辑
  * - 注入 __PILOT_SERVER_ORIGIN__ 使 SSE/fetch 指向 dev server（跨域场景必需）
  */
@@ -51,6 +51,7 @@ export function buildBridgeScript(options: ResolvedPilotOptions, pilotVersion: s
         .replace(/__LOCALE_POSITION__/g, '')
         .replace(/__LOCALE_TEXT_CONTENT__/g, '')
         .replace(/__LOCALE_STYLE__/g, '')
+        .replace(/__PILOT_INSTANCE_TYPE__/g, "'console'")
       return `  /* === ${name} === */\n  ${resolved.trim()}`
     })
     .join('\n\n')
@@ -66,9 +67,8 @@ export function buildBridgeScript(options: ResolvedPilotOptions, pilotVersion: s
 
   /** dev server 地址（SSE/fetch 使用绝对 URL，支持跨域连接） */
   window.__PILOT_SERVER_ORIGIN__ = "${serverOrigin}";
-  /** console: 前缀的 instance ID，与 Vite 注入的 tab 区分 */
   var __PILOT_VERSION__ = "${pilotVersion}";
-  window.__pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || ("console:" + Math.random().toString(16).slice(2, 10));
+  window.__pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || Math.random().toString(16).slice(2, 10);
   sessionStorage.setItem('__pilot_instanceId', window.__pilot_instanceId);
 
   console.log("[Pilot] Console Bridge starting... (instance: " + window.__pilot_instanceId + ")");

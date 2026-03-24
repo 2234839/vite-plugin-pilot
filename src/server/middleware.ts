@@ -3,6 +3,7 @@ import { watch as fsWatch, type FSWatcher } from 'fs'
 import type { ResolvedPilotOptions, ExecResult, ElementInfo } from '../types'
 import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
+import type { InstanceType } from './file-bridge'
 import { generateElementPrompt } from '../prompt/generator'
 import { getCompactText } from './compact'
 import { buildBridgeScript } from './bridge'
@@ -50,12 +51,41 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     }
   }
 
-  /** 通过 SSE 广播代码给浏览器（清除旧结果，更新活跃时间） */
+  /** 通过 SSE 广播代码给浏览器（同时写 pending.js 供轮询 fallback 使用） */
   function dispatchCode(instanceId: string, code: string): void {
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
+    bridge.writePendingJs(instanceId, code)
     broadcastCode(instanceId, code)
+  }
+
+  /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用） */
+  function formatRunResult(result: ExecResult | null | undefined, opts: WaiterOptions): string {
+    if (!result) return 'TIMEOUT'
+
+    const codePreview = typeof result.code === 'string' ? result.code.slice(0, 20).replace(/\n/g, ' ') : ''
+    const lines: string[] = []
+    lines.push(`--- runcode --- ${codePreview}`)
+
+    if (result.success) {
+      const raw = result.result != null ? String(result.result) : ''
+      if (raw !== 'undefined') lines.push(raw)
+    } else {
+      lines.push(`ERROR: ${result.error || 'unknown'}`)
+    }
+
+    if (result.logs && result.logs.length > 0) {
+      lines.push('--- logs ---')
+      lines.push(...result.logs)
+    }
+
+    if (opts.withPage && result.snapshotText) {
+      lines.push('--- page snapshot ---')
+      lines.push(result.snapshotText)
+    }
+
+    return lines.join('\n')
   }
 
   /** 每个实例最后的浏览器活动时间戳 */
@@ -67,9 +97,16 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   /** 等待者选项映射（类型安全，替代 (res as any).__pilot_xxx） */
   const waiterOptions = new WeakMap<ServerResponse, WaiterOptions>()
 
-  /** 从请求中提取实例 ID（优先用 X-Pilot-Instance header，fallback 用 default） */
+  /** 从请求中提取实例 ID（优先 header > query param > default） */
   function getInstanceId(req: IncomingMessage): string {
-    return (req.headers['x-pilot-instance'] as string) || FileBridge.toInstanceId('/')
+    const headerId = req.headers['x-pilot-instance'] as string
+    if (headerId) return headerId
+    try {
+      const url = new URL(req.url || '/', 'http://localhost')
+      const queryId = url.searchParams.get('instance')
+      if (queryId) return queryId
+    } catch { /* ignore */ }
+    return FileBridge.toInstanceId('/')
   }
 
   return {
@@ -81,6 +118,21 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         next()
         return
       }
+
+      /** CORS preflight：GM_xmlhttpRequest POST 带 Content-Type: application/json 会触发 OPTIONS 预检 */
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Pilot-Instance, X-Pilot-Title',
+          'Access-Control-Max-Age': '86400',
+        })
+        res.end()
+        return
+      }
+
+      /** 所有响应添加 CORS header（支持 GM_xmlhttpRequest 跨域访问） */
+      res.setHeader('Access-Control-Allow-Origin', '*')
 
       const endpoint = req.url.split('?')[0]
       const instanceId = getInstanceId(req)
@@ -140,20 +192,15 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
 
         lastBrowserActivity[sseInstance] = Date.now()
 
-        /** 注册实例信息（referer 可能因代理环境丢失，fallback 用默认路径） */
-        const referer = req.headers.referer
-        let urlPath = '/'
-        if (referer) {
-          try {
-            const urlObj = new URL(referer)
-            urlPath = urlObj.pathname
-          } catch { /* ignore */ }
-        }
-        bridge.writeActiveInstance(sseInstance, urlPath, pageTitle)
+        /** 注册实例信息（跨域时 referer 丢失，优先用 query params 中的 path） */
+        const queryPath = url.searchParams.get('path') || ''
+        const referer = queryPath || req.headers.referer || '/'
+        const clientType = (url.searchParams.get('type') as InstanceType) || 'vite'
+        bridge.writeActiveInstance(sseInstance, referer, clientType, pageTitle)
 
         /** 版本不匹配时立即返回 reload 指令然后关闭连接
-         *  Console Bridge 实例（console: 前缀）跳过版本检查（无法 reload，会丢失注入代码） */
-        if (clientVersion && pilotVersion && clientVersion !== pilotVersion && !sseInstance.startsWith('console:')) {
+         *  Console Bridge / Userscript 实例跳过版本检查（无法 reload，会丢失注入代码） */
+        if (clientVersion && pilotVersion && clientVersion !== pilotVersion && clientType === 'vite') {
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -180,7 +227,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
          *  同时更新活跃时间，确保 CLI 的 30s 活跃检测不会误判 */
         const heartbeat = setInterval(() => {
           lastBrowserActivity[sseInstance] = Date.now()
-          bridge.writeActiveInstance(sseInstance, urlPath)
+          bridge.writeActiveInstance(sseInstance, referer, clientType)
           res.write('event: ping\ndata: 1\n\n')
         }, 30_000)
 
@@ -290,34 +337,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
               wRes.writeHead(200, { 'Content-Type': 'application/json' })
               wRes.end(JSON.stringify(response))
             } else if (wOpts?.type === 'run') {
-              /** GET /__pilot/run 请求：返回纯文本结果
-               *  成功：只返回结果（?page=1 附带 snapshot，?logs=1 附带日志）
-               *  失败：附带控制台日志，帮助 agent 调试 */
-              let output: string
-              if (!result) {
-                output = 'TIMEOUT'
-              } else if (result.success) {
-                /** 过滤 undefined 返回值（链式操作最后一个 __pilot_wait 的返回值），减少 CLI 噪音 */
-                const raw = result.result != null ? String(result.result) : ''
-                output = raw === 'undefined' ? '' : raw
-                if (wOpts.withLogs && result.logs && result.logs.length > 0) {
-                  output += '\n--- logs ---\n' + result.logs.join('\n')
-                }
-                if (wOpts.withPage && result.snapshotText) {
-                  output += '\n--- page snapshot ---\n' + result.snapshotText
-                }
-              } else {
-                output = `ERROR: ${result.error || 'unknown'}`
-                /** 失败时也附带日志和 snapshot（?page=1 ?logs=1），帮助 agent 一次 tool call 完成调试 */
-                if (wOpts.withLogs && result.logs && result.logs.length > 0) {
-                  output += '\n--- logs ---\n' + result.logs.join('\n')
-                }
-                if (wOpts.withPage && result.snapshotText) {
-                  output += '\n--- page snapshot ---\n' + result.snapshotText
-                }
-              }
               wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-              wRes.end(output)
+              wRes.end(formatRunResult(result, wOpts))
             } else if (wOpts?.type === 'page') {
               /** GET /__pilot/page?fresh=1 请求：返回纯文本 compact snapshot */
               if (result?.success && typeof result.result === 'string') {
@@ -538,11 +559,13 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       /** ---------- GET /__pilot/has-code (Userscript 轮询端点) ----------
        *  返回 pending.js 中的待执行代码（读取并删除，消费语义） */
       if (endpoint === '/__pilot/has-code' && req.method === 'GET') {
-        const code = bridge.readPendingJs(instanceId)
+        const url = new URL(req.url, 'http://localhost')
+        const hasCodeInstance = url.searchParams.get('instance') || instanceId
+        const code = bridge.readPendingJs(hasCodeInstance)
         if (code) {
-          bridge.clearExecResult(instanceId)
-          bridge.clearExecDone(instanceId)
-          lastBrowserActivity[instanceId] = Date.now()
+          bridge.clearExecResult(hasCodeInstance)
+          bridge.clearExecDone(hasCodeInstance)
+          lastBrowserActivity[hasCodeInstance] = Date.now()
           res.writeHead(200, { 'Content-Type': 'text/plain' })
           res.end(code)
         } else {
@@ -556,12 +579,68 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
        *  userscript 启动时注册实例信息，供 CLI status 查看和实例选择 */
       if (endpoint === '/__pilot/register' && req.method === 'GET') {
         const url = new URL(req.url, 'http://localhost')
-        const pagePath = url.searchParams.get('path') || '/'
+        const registerInstanceId = url.searchParams.get('instance') || instanceId
+        const pageUrl = url.searchParams.get('path') || '/'
         const pageTitle = url.searchParams.get('title') || ''
-        bridge.writeActiveInstance(instanceId, pagePath, pageTitle)
+        bridge.writeActiveInstance(registerInstanceId, pageUrl, 'userscript', pageTitle)
+        lastBrowserActivity[registerInstanceId] = Date.now()
         lastBrowserActivity[instanceId] = Date.now()
         res.writeHead(200, { 'Content-Type': 'text/plain' })
         res.end('ok')
+        return
+      }
+
+      /** ---------- GET /__pilot/result-img (Image GET 发送结果，绕过 CORS/POST 限制) ---------- */
+      if (endpoint === '/__pilot/result-img' && req.method === 'GET') {
+        const url = new URL(req.url, 'http://localhost')
+        const imgInstance = url.searchParams.get('instance') || instanceId
+        const data = url.searchParams.get('d')
+        lastBrowserActivity[imgInstance] = Date.now()
+        if (data) {
+          try {
+            const result = JSON.parse(decodeURIComponent(escape(atob(data)))) as ExecResult
+            /** 复用 POST /result 的结果处理逻辑 */
+            const clientSnapshot = result.snapshot
+            delete result.snapshot
+            const snapshotEls = clientSnapshot
+              ? (clientSnapshot as Record<string, unknown>).visibleElements ?? (clientSnapshot as Record<string, unknown>).els
+              : null
+            const hasVisibleEls = Array.isArray(snapshotEls) && snapshotEls.length > 0
+            if (hasVisibleEls) {
+              const { fullText } = getCompactText(clientSnapshot as unknown as Record<string, unknown>)
+              bridge.writeCompactSnapshot(fullText, imgInstance)
+              result.snapshotText = fullText
+            }
+            if (result.logs && result.logs.length > 0) {
+              bridge.writeRecentLogs(result.logs, imgInstance)
+            }
+            if (typeof result.code === 'string' && result.code.length > 120) {
+              result.code = result.code.slice(0, 120) + '...'
+            }
+            bridge.writeExecResult(result, imgInstance)
+            bridge.writeResultTxt(result, imgInstance)
+            bridge.writeExecDone(imgInstance)
+            /** 通知队首等待者 */
+            const waiters = execWaiters[imgInstance]
+            if (waiters && waiters.length > 0) {
+              const waiter = waiters.shift()!
+              clearTimeout(waiter.timer)
+              const wRes = waiter.res
+              const wOpts = waiterOptions.get(wRes)
+              if (wOpts?.type === 'run') {
+                wRes.writeHead(200, { 'Content-Type': 'text/plain' })
+                wRes.end(formatRunResult(result, wOpts))
+              } else if (result) {
+                wRes.writeHead(200, { 'Content-Type': 'application/json' })
+                wRes.end(JSON.stringify(result))
+              }
+            }
+          } catch { /* ignore malformed data */ }
+        }
+        /** 返回 1x1 透明 GIF（Image 加载成功） */
+        const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
+        res.writeHead(200, { 'Content-Type': 'image/gif', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' })
+        res.end(gif)
         return
       }
 

@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite'
 import { resolve, join } from 'path'
-import { writeFileSync } from 'fs'
+import { existsSync, writeFileSync, mkdirSync } from 'fs'
 import type { PilotOptions, ResolvedPilotOptions } from './types'
 import { DEFAULT_OPTIONS, PILOT_FILES } from './constants'
 import { createMiddleware } from './server/middleware'
@@ -15,6 +15,7 @@ export { buildBridgeScript } from './server/bridge'
 export { buildUserscript } from './server/userscript'
 export { DEFAULT_OPTIONS, PILOT_FILES } from './constants'
 export type { PilotOptions, ResolvedPilotOptions } from './types'
+export type { InstanceInfo, InstanceType } from './server/file-bridge'
 
 /**
  * Vite Plugin Pilot — AI Agent 驾驶浏览器的导航工具
@@ -35,6 +36,7 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
       maxResultSize: userOptions.maxResultSize ?? DEFAULT_OPTIONS.maxResultSize,
       inspector: userOptions.inspector ?? DEFAULT_OPTIONS.inspector,
       locale: userOptions.locale ?? DEFAULT_OPTIONS.locale,
+      checkUpdate: userOptions.checkUpdate ?? DEFAULT_OPTIONS.checkUpdate,
       pilotDir: resolve(cwd, PILOT_FILES.dir),
     }
   }
@@ -61,6 +63,16 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
       if (!resolvedOptions) {
         resolvedOptions = resolveOptions()
       }
+
+      /** 写入插件配置供 CLI 读取（checkUpdate 等） */
+      if (!existsSync(resolvedOptions.pilotDir)) {
+        mkdirSync(resolvedOptions.pilotDir, { recursive: true })
+      }
+      writeFileSync(
+        join(resolvedOptions.pilotDir, 'pilot-config.json'),
+        JSON.stringify({ checkUpdate: resolvedOptions.checkUpdate }),
+        'utf-8',
+      )
 
       /** 生成统一版本 ID，注入脚本和文件用同一个值 */
       const pilotVersion = String(Date.now())

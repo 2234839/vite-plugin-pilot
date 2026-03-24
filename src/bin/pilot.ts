@@ -7,16 +7,17 @@
  * 2. 独立 Server 模式：`pilot server` 启动独立 HTTP server（配合 bridge.js 或 userscript）
  *
  * 用法:
- *   npx pilot run '1+1'            执行 JS 并获取结果+日志+页面快照
- *   npx pilot run 'code' nopage    执行但不附带页面快照
- *   npx pilot run 'code' nologs    执行但不附带日志
- *   npx pilot page                 读取页面快照（默认实时采集）
- *   npx pilot page cached          读取缓存的页面快照
- *   npx pilot logs                 读取最近 exec 的控制台日志
- *   npx pilot status               连接状态诊断
- *   npx pilot server [port]        启动独立 HTTP server（默认 5173）
- *   npx pilot bridge               输出 Console Bridge 脚本
- *   npx pilot userscript           输出 Tampermonkey 脚本
+ *   npx pilot run '1+1'              执行 JS 并获取结果+日志+页面快照
+ *   npx pilot run 'code' nopage     执行但不附带页面快照
+ *   npx pilot run 'code' nologs     执行但不附带日志
+ *   npx pilot run 'code' instance:abc  指定目标实例（支持前缀模糊匹配）
+ *   npx pilot page                   读取页面快照（默认实时采集）
+ *   npx pilot page cached            读取缓存的页面快照
+ *   npx pilot logs                   读取最近 exec 的控制台日志
+ *   npx pilot status                 连接状态诊断（含 type/url/title）
+ *   npx pilot server [port]          启动独立 HTTP server（默认 5173）
+ *   npx pilot bridge                 输出 Console Bridge 脚本
+ *   npx pilot userscript             输出 Tampermonkey 脚本
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, watch as fsWatch } from 'fs'
@@ -32,22 +33,10 @@ import {
   PILOT_FILES,
 } from '../index'
 import type { ResolvedPilotOptions } from '../types'
+import type { InstanceInfo } from '../index'
+import pkg from '../../package.json'
 
-/** 读取 package.json 中的版本号 */
-function getCurrentVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(resolve(dirname(dirname(fileURLToPath(import.meta.url))), 'package.json'), 'utf-8'))
-    return pkg.version
-  } catch {
-    return '0.0.0'
-  }
-}
-
-function fileURLToPath(url: string): string {
-  return url.replace(/^file:\/\//, '').replace(/\/([A-Za-z]:\/)/, '$1')
-}
-
-const CURRENT_VERSION = getCurrentVersion()
+const CURRENT_VERSION = pkg.version
 
 /** 实例活跃判定阈值（秒），超过此时间视为不活跃 */
 const INSTANCE_ACTIVE_THRESHOLD = 90
@@ -220,13 +209,6 @@ function readJsonSafe<T = unknown>(filePath: string): T | null {
   }
 }
 
-interface InstanceInfo {
-  path: string
-  label: string
-  lastSeen: number
-  title?: string
-}
-
 /**
  * 写入待执行代码（清除旧的 exec-done 和 result）
  */
@@ -275,12 +257,12 @@ function buildInstanceHint(activeData: Record<string, InstanceInfo>, currentInst
     .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
     .map(([id, info]) => {
       const isCurrent = id === currentInstanceId ? '← ' : '  '
-      /** console: 前缀实例显示完整 ID，普通实例显示前 8 位 */
-      const displayId = id.startsWith('console:') ? id : id.slice(0, 8)
+      const displayId = id.slice(0, 8)
+      const typeTag = info.type !== 'vite' ? `[${info.type}] ` : ''
       const title = info.title ? ` [${info.title}]` : ''
       const agoSec = Math.round((now - info.lastSeen) / 1000)
       const agoStr = agoSec < 60 ? `${agoSec}s` : `${Math.round(agoSec / 60)}m`
-      return `${isCurrent}${displayId} (${info.label}${title}) ${agoStr} ago`
+      return `${isCurrent}${typeTag}${displayId} (${info.label}${title}) ${agoStr} ago`
     })
 
   if (recent.length <= 1) return ''
@@ -320,15 +302,13 @@ function checkNpmUpdate(pilotDir: string) {
   req.on('timeout', () => { clearTimeout(timer); req.destroy() })
 }
 
-/**
- * 构建新版本提示（从缓存文件读取，有新版本时返回提示文本）
- */
+/** 构建新版本提示（从缓存文件读取，有新版本时返回提示文本） */
 function buildUpdateHint(pilotDir: string): string {
   const checkFile = join(pilotDir, 'npm-check.json')
   try {
     const cached = JSON.parse(readFileSync(checkFile, 'utf-8'))
     if (cached.latest && cached.latest > CURRENT_VERSION) {
-      return `\n--- update ---\nNew version: vite-plugin-pilot@${cached.latest} (current: ${CURRENT_VERSION})\nnpx npm i -g vite-plugin-pilot`
+      return `\n--- update ---\nNew version: vite-plugin-pilot@${cached.latest} (current: ${CURRENT_VERSION})`
     }
   } catch { /* ignore */ }
   return ''
@@ -354,8 +334,11 @@ async function main() {
   const { command, flags, positional } = parseArgs(process.argv.slice(2))
   const pilotDir = findPilotDir()
 
-  /** 异步检查 npm 新版本（非阻塞，每天一次） */
-  if (pilotDir) checkNpmUpdate(pilotDir)
+  /** 异步检查 npm 新版本（非阻塞，每天一次，可通过插件配置关闭） */
+  if (pilotDir) {
+    const config = readJsonSafe<{ checkUpdate?: boolean }>(join(pilotDir, 'pilot-config.json'))
+    if (config?.checkUpdate !== false) checkNpmUpdate(pilotDir)
+  }
 
   /** 解析 instance ID：命令行参数 > 环境变量 > 自动选最近活跃的实例 */
   let instanceId: string | undefined = flags.instance || process.env.PILOT_INSTANCE
@@ -372,6 +355,19 @@ async function main() {
     instanceId = instanceId || 'default'
   }
 
+  /** 模糊匹配实例 ID（支持前缀匹配，找最长匹配） */
+  if (instanceId && !activeData[instanceId]) {
+    let bestMatch = ''
+    let bestLen = 0
+    for (const id of Object.keys(activeData)) {
+      if (id.startsWith(instanceId) && instanceId.length > bestLen) {
+        bestMatch = id
+        bestLen = instanceId.length
+      }
+    }
+    if (bestMatch) instanceId = bestMatch
+  }
+
   /** 检查实例是否活跃（90 秒内有连接，3 个心跳周期的容错） */
   const instanceInfo = activeData[instanceId!]
   const recentThreshold = Date.now() - INSTANCE_ACTIVE_THRESHOLD * 1000
@@ -380,12 +376,13 @@ async function main() {
       .filter(([, info]) => info.lastSeen >= recentThreshold)
       .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
       .map(([id, info]) => {
-        const displayId = id.startsWith('console:') ? id : id.slice(0, 8)
+        const displayId = id.slice(0, 8)
+        const typeTag = info.type !== 'vite' ? `[${info.type}] ` : ''
         const title = info.title ? ` [${info.title}]` : ''
-        return `  ${displayId} (${info.label}${title})`
+        return `  ${typeTag}${displayId} (${info.label}${title})`
       })
     if (available.length > 0) {
-      const currentDisplay = instanceId!.startsWith('console:') ? instanceId : instanceId!.slice(0, 8)
+      const currentDisplay = instanceId!.slice(0, 8)
       console.error(`WARNING: 实例 ${currentDisplay} 不活跃，可用实例:\n${available.join('\n')}\n提示: npx pilot ${command} instance:xxxxxxxx`)
     }
   }
@@ -550,7 +547,7 @@ async function main() {
           /** 活跃时间距现在的秒数 */
           const agoSec = Math.round((now - info.lastSeen) / 1000)
           const agoStr = agoSec < 60 ? `${agoSec}s ago` : `${Math.round(agoSec / 60)}m ago`
-          return { id: id.slice(0, 8), label: info.label, title: info.title || '', lastSeen: agoStr }
+          return { id, type: info.type, label: info.label, url: info.path, title: info.title || '', lastSeen: agoStr }
         })
       const statusInstanceDir = getInstanceDir(pilotDir, instanceId!)
       const hasSnapshot = existsSync(join(statusInstanceDir, PILOT_FILES.compactSnapshot))
@@ -578,7 +575,7 @@ async function main() {
         console.error('ERROR: 未找到 port.txt，请先启动 dev server')
         process.exit(1)
       }
-      const result = await httpGet('/__pilot/bridge.js', port, 'console:dummy', 5000)
+      const result = await httpGet('/__pilot/bridge.js', port, 'dummy', 5000)
       if (result && result.status === 200) {
         console.log(result.body)
       } else {
@@ -598,7 +595,7 @@ async function main() {
         console.error('ERROR: 未找到 port.txt，请先启动 dev server')
         process.exit(1)
       }
-      const result = await httpGet('/__pilot/userscript.js', port, 'userscript:dummy', 5000)
+      const result = await httpGet('/__pilot/userscript.js', port, 'dummy', 5000)
       if (result && result.status === 200) {
         console.log(result.body)
       } else {
@@ -622,14 +619,23 @@ async function main() {
       const pilotVersion = String(Date.now())
       const { handler, bridge } = createMiddleware(options, pilotVersion)
 
-      /** 包装 handler：非 /__pilot/ 请求返回 404 */
+      /** 包装 handler：添加 CORS + 非 /__pilot/ 请求返回 404 */
       function wrappedHandler(req: http.IncomingMessage, res: http.ServerResponse) {
+        /** 所有响应都添加 CORS headers */
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Pilot-Instance, X-Pilot-Version, X-Pilot-Title')
+
+        /** OPTIONS 预检请求直接返回 */
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204)
+          res.end()
+          return
+        }
+
         handler(req, res, () => {
-          /** 非 pilot 路由，返回 CORS 友好的 404 */
-          res.writeHead(404, {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          })
+          /** 非 pilot 路由，返回 404 */
+          res.writeHead(404, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Not found. This is a Pilot server — use bridge.js or userscript to connect.' }))
         })
       }
@@ -695,7 +701,8 @@ async function main() {
   userscript                                    输出 Tampermonkey 脚本（安装后自动在所有页面运行）
   help                                          显示此帮助信息
 
-实例选择: instance:xxxxxxxx 或环境变量 PILOT_INSTANCE
+实例选择: instance:xxx（支持前缀模糊匹配）或环境变量 PILOT_INSTANCE
+实例类型: vite（默认）、console（bridge）、userscript（油猴）
 目录探测: cwd
 
 --- 浏览器端辅助函数 (在 run 中执行) ---

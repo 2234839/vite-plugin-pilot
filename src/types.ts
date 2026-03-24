@@ -14,6 +14,8 @@ export interface PilotOptions {
   inspector?: boolean
   /** 语言环境，默认 'zh'。支持 'zh' | 'en' */
   locale?: 'zh' | 'en'
+  /** 是否检查 npm 新版本，默认 true */
+  checkUpdate?: boolean
 }
 
 export type LogLevel = 'info' | 'warn' | 'error'
