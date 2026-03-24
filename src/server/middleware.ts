@@ -56,7 +56,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
-    bridge.writePendingJs(instanceId, code)
+    bridge.writePendingJs(code, instanceId)
     broadcastCode(instanceId, code)
   }
 
