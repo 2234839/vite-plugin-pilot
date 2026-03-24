@@ -19,6 +19,8 @@ interface WaiterOptions {
   withLogs?: boolean
   withSnapshot?: boolean
   compact?: boolean
+  /** CLI 传入的原始代码（用于 runcode 显示，避免竞态导致显示错误的 result.code） */
+  runCode?: string
 }
 
 /**
@@ -39,6 +41,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   /** SSE 连接池（按实例隔离） */
   const sseConnections: Record<string, Array<ServerResponse>> = {}
 
+  /** 每个实例最近一次通过 dispatchCode 广播的代码（用于防止 fs.watch 重复广播） */
+  const lastDispatchedCode: Record<string, string> = {}
+
   /** 实例目录的 fs.watch 监听器（每个实例一个，多 SSE 连接共享） */
   const instanceWatchers: Record<string, FSWatcher> = {}
 
@@ -51,12 +56,14 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     }
   }
 
-  /** 通过 SSE 广播代码给浏览器（同时写 pending.js 供轮询 fallback 使用） */
+  /** 写 pending.js 并通过 SSE 广播代码给浏览器（同时写文件供 CLI 文件通道使用）
+   *  记录已广播的 code，防止 fs.watch 的 checkAndBroadcast 重复推送 */
   function dispatchCode(instanceId: string, code: string): void {
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
     bridge.writePendingJs(code, instanceId)
+    lastDispatchedCode[instanceId] = code
     broadcastCode(instanceId, code)
   }
 
@@ -64,7 +71,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   function formatRunResult(result: ExecResult | null | undefined, opts: WaiterOptions): string {
     if (!result) return 'TIMEOUT'
 
-    const codePreview = typeof result.code === 'string' ? result.code.slice(0, 20).replace(/\n/g, ' ') : ''
+    /** 优先使用 CLI 传入的原始代码，fallback 到客户端返回的 result.code */
+    const codeSource = opts.runCode || (typeof result.code === 'string' ? result.code : '')
+    const codePreview = codeSource.slice(0, 200).replace(/\n/g, ' ')
     const lines: string[] = []
     lines.push(`--- runcode --- ${codePreview}`)
 
@@ -75,7 +84,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       lines.push(`ERROR: ${result.error || 'unknown'}`)
     }
 
-    if (result.logs && result.logs.length > 0) {
+    if (opts.withLogs !== false && result.logs && result.logs.length > 0) {
       lines.push('--- logs ---')
       lines.push(...result.logs)
     }
@@ -234,10 +243,12 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         /** 用 fs.watch 监听实例目录变化，CLI 写入 pending.js 时即时推送
          *  失败时 fallback 到 1s setInterval 轮询（网络文件系统、Docker 挂载等场景） */
         const instanceDir = bridge.getInstanceDir(sseInstance)
-        /** 检查并推送 pending.js 代码的公共逻辑（peek 不删除，留给 polling 端点消费） */
+        /** 检查并推送 pending.js 代码（供 CLI 文件通道触发）
+         *  跳过已被 dispatchCode 广播过的 code，防止双重推送导致客户端 exec lock 排队竞态 */
         const checkAndBroadcast = () => {
           const fileCode = bridge.peekPendingJs(sseInstance)
           if (!fileCode) return
+          if (lastDispatchedCode[sseInstance] === fileCode) return
           bridge.clearExecResult(sseInstance)
           bridge.clearExecDone(sseInstance)
           lastBrowserActivity[sseInstance] = Date.now()
@@ -323,6 +334,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           bridge.writeExecResult(result, instanceId)
           bridge.writeResultTxt(result, instanceId)
           bridge.writeExecDone(instanceId)
+          /** exec 完成后清除已广播标记，允许后续相同 code 的请求被正常推送 */
+          delete lastDispatchedCode[instanceId]
           /** 通知队首等待者 */
           const waiters = execWaiters[instanceId]
           if (waiters && waiters.length > 0) {
@@ -518,7 +531,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         dispatchCode(runInstance, code)
 
         /** 同步等待结果，超时后返回 TIMEOUT */
-        enqueueWaiter(runInstance, res, { type: 'run', withPage, withLogs }, 70_000, () => {
+        enqueueWaiter(runInstance, res, { type: 'run', withPage, withLogs, runCode: code }, 70_000, () => {
           res.writeHead(504, { 'Content-Type': 'text/plain' })
           res.end('TIMEOUT')
         })

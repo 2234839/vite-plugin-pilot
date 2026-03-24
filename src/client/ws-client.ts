@@ -46,27 +46,54 @@ export const wsClientCode = `
   /** 已知的噪音日志关键词，匹配时不纳入 exec 日志以节省 token */
   var LOG_NOISE = ['[Vue warn]', '[vite]', '[COSE]', '[Pilot] Running'];
 
-  /** 截取 exec 期间新增的日志条目（紧凑格式：[TYPE] message） */
+  /** 格式化单条日志为紧凑文本 */
+  function formatLog(l) {
+    var msg = window.__pilot_logToMessage(l);
+    /** warn/info 截断到 150 字符（去掉 Vue 组件堆栈等冗余信息），error 保留完整信息 */
+    if (l.type !== 'error' && msg.length > 150) {
+      var cutIdx = msg.indexOf('\\n');
+      msg = cutIdx > 0 && cutIdx < 150 ? msg.slice(0, cutIdx) : msg.slice(0, 150) + '...';
+    }
+    return '[' + l.type + '] ' + msg;
+  }
+
+  /** 截取 exec 期间的日志 + exec 之前的上下文日志（帮助 agent 了解页面状态）
+   *  上下文日志：取 exec 开始前最近 10 条非噪音日志 */
   function getLogsSince(idx) {
     if (!window.__pilot_logs) return [];
-    var newLogs = window.__pilot_logs.slice(idx);
-    return newLogs
-      .filter(function(l) {
-        /** 过滤框架/工具噪音日志 */
-        for (var ni = 0; ni < LOG_NOISE.length; ni++) {
-          if (l.message.indexOf(LOG_NOISE[ni]) !== -1) return false;
-        }
-        return true;
-      })
-      .map(function(l) {
-        var msg = window.__pilot_logToMessage(l);
-        /** warn/info 截断到 150 字符（去掉 Vue 组件堆栈等冗余信息），error 保留完整信息 */
-        if (l.type !== 'error' && msg.length > 150) {
-          var cutIdx = msg.indexOf('\\n');
-          msg = cutIdx > 0 && cutIdx < 150 ? msg.slice(0, cutIdx) : msg.slice(0, 150) + '...';
-        }
-        return '[' + l.type + '] ' + msg;
-      });
+    var allLogs = window.__pilot_logs;
+
+    /** 收集 exec 开始前的上下文日志（最近 10 条非噪音） */
+    var contextLogs = [];
+    var contextMax = 10;
+    for (var ci = idx - 1; ci >= 0 && contextLogs.length < contextMax; ci--) {
+      var entry = allLogs[ci];
+      var cMsg = window.__pilot_logToMessage(entry);
+      var isNoise = false;
+      for (var ni = 0; ni < LOG_NOISE.length; ni++) {
+        if (cMsg.indexOf(LOG_NOISE[ni]) !== -1) { isNoise = true; break; }
+      }
+      if (!isNoise) contextLogs.unshift(formatLog(entry));
+    }
+
+    /** 收集 exec 期间的新增日志 */
+    var newLogs = allLogs.slice(idx);
+    var execLogs = [];
+    for (var li = 0; li < newLogs.length; li++) {
+      var l = newLogs[li];
+      var lMsg = window.__pilot_logToMessage(l);
+      var lNoise = false;
+      for (var lni = 0; lni < LOG_NOISE.length; lni++) {
+        if (lMsg.indexOf(LOG_NOISE[lni]) !== -1) { lNoise = true; break; }
+      }
+      if (!lNoise) execLogs.push(formatLog(l));
+    }
+
+    /** 合并：上下文日志用 "~" 前缀标识为历史，exec 日志无前缀 */
+    var result = [];
+    for (var ri = 0; ri < contextLogs.length; ri++) result.push('~ ' + contextLogs[ri]);
+    for (var ei = 0; ei < execLogs.length; ei++) result.push(execLogs[ei]);
+    return result;
   }
 
   function execCode(code) {
