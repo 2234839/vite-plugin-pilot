@@ -1219,8 +1219,9 @@ li.empty { color: #64748b; font-style: italic; text-align: center; padding: 1rem
 .progress-bar { height: 100%; background: linear-gradient(90deg, #60a5fa, #a78bfa); border-radius: 12px; transition: width 0.3s; }
 .progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.75rem; font-weight: bold; color: #e2e8f0; }
 .tab-bar { display: flex; gap: 0; margin-bottom: 0.75rem; border-bottom: 1px solid #334155; }
-.tab-btn { padding: 0.5rem 1rem; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: #94a3b8; }
-.tab-btn.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+.tab-btn { padding: 0.5rem 1rem; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: #94a3b8; cursor: pointer; transition: color 0.15s, background 0.15s; }
+.tab-btn:hover { color: #cbd5e1; background: rgba(255,255,255,0.04); }
+.tab-btn.active { color: #e2e8f0; border-bottom-color: #60a5fa; background: rgba(96,165,250,0.08); font-weight: 500; }
 .tab-content { padding: 0.5rem 0; }
 .tab-panel { padding: 0.75rem; background: #0f172a; border-radius: 6px; font-size: 0.875rem; color: #94a3b8; }
 .tab-history { margin-top: 0.5rem; font-size: 0.75rem; color: #64748b; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }

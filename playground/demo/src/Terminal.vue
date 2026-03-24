@@ -339,20 +339,35 @@ function onInputKeydown(e: KeyboardEvent) {
   }
 }
 
-/** 拖拽处理 */
-function onDragStart(e: MouseEvent) {
-  if ((e.target as HTMLElement).tagName === 'BUTTON') return
-  dragging = true
-  const rect = terminalEl.value!.getBoundingClientRect()
-  dragOffset.x = e.clientX - rect.left
-  dragOffset.y = e.clientY - rect.top
+/** 从指针事件中提取坐标，兼容 mouse 和 touch */
+function getPointerXY(e: MouseEvent | TouchEvent): { x: number; y: number } {
+  if ('touches' in e && e.touches.length > 0) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY }
+  }
+  if ('changedTouches' in e && e.changedTouches.length > 0) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY }
+  }
+  return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY }
 }
 
-function onDragMove(e: MouseEvent) {
+/** 拖拽处理 */
+function onDragStart(e: MouseEvent | TouchEvent) {
+  const target = ('target' in e) ? e.target as HTMLElement : undefined
+  if (target?.tagName === 'BUTTON') return
+  dragging = true
+  const rect = terminalEl.value!.getBoundingClientRect()
+  const { x, y } = getPointerXY(e)
+  dragOffset.x = x - rect.left
+  dragOffset.y = y - rect.top
+}
+
+function onDragMove(e: MouseEvent | TouchEvent) {
   if (!dragging) return
+  if ('preventDefault' in e) e.preventDefault()
+  const { x, y } = getPointerXY(e)
   const el = terminalEl.value!
-  el.style.left = `${e.clientX - dragOffset.x}px`
-  el.style.top = `${e.clientY - dragOffset.y}px`
+  el.style.left = `${x - dragOffset.x}px`
+  el.style.top = `${y - dragOffset.y}px`
   el.style.right = 'auto'
   el.style.bottom = 'auto'
 }
@@ -371,11 +386,15 @@ watch(() => props.pilotReady, (ready) => {
 onMounted(() => {
   document.addEventListener('mousemove', onDragMove)
   document.addEventListener('mouseup', onDragEnd)
+  document.addEventListener('touchmove', onDragMove, { passive: false })
+  document.addEventListener('touchend', onDragEnd)
 })
 
 onUnmounted(() => {
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
+  document.removeEventListener('touchmove', onDragMove)
+  document.removeEventListener('touchend', onDragEnd)
   demoAbort = true
 })
 </script>
@@ -388,7 +407,7 @@ onUnmounted(() => {
     :class="{ minimized }"
   >
     <!-- 标题栏 -->
-    <div class="terminal-header" @mousedown="onDragStart">
+    <div class="terminal-header" @mousedown="onDragStart" @touchstart.prevent="onDragStart">
       <div class="header-dots">
         <span class="dot dot-red" @click.stop="closed = true" />
         <span class="dot dot-yellow" @click.stop="minimized = !minimized" />
@@ -588,5 +607,48 @@ onUnmounted(() => {
 
 .terminal-input:disabled {
   opacity: 0.4;
+}
+
+@media (max-width: 540px) {
+  .terminal {
+    width: calc(100vw - 16px);
+    right: 8px;
+    bottom: 8px;
+    max-height: 260px;
+    font-size: 11px;
+  }
+
+  .terminal-header {
+    height: 32px;
+    padding: 0 8px;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .terminal-title {
+    font-size: 12px;
+  }
+
+  .btn-demo {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+
+  .terminal-output {
+    max-height: 190px;
+    padding: 6px 8px;
+  }
+
+  .terminal-input-line {
+    padding: 4px 8px;
+  }
+
+  .line.cmd-snapshot {
+    font-size: 10.5px;
+  }
 }
 </style>
