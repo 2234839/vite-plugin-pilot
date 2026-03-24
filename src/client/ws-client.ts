@@ -89,9 +89,14 @@ export const wsClientCode = `
       if (!lNoise) execLogs.push(formatLog(l));
     }
 
-    /** 合并：上下文日志用 "~" 前缀标识为历史，exec 日志无前缀 */
+    /** 合并：上下文日志和 exec 日志用分隔线区分 */
     var result = [];
-    for (var ri = 0; ri < contextLogs.length; ri++) result.push('~ ' + contextLogs[ri]);
+    if (contextLogs.length > 0 && execLogs.length > 0) {
+      for (var ri = 0; ri < contextLogs.length; ri++) result.push(contextLogs[ri]);
+      result.push('---');
+    } else if (contextLogs.length > 0) {
+      for (var ri = 0; ri < contextLogs.length; ri++) result.push(contextLogs[ri]);
+    }
     for (var ei = 0; ei < execLogs.length; ei++) result.push(execLogs[ei]);
     return result;
   }

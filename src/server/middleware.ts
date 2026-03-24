@@ -77,6 +77,24 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     const lines: string[] = []
     lines.push(`--- runcode --- ${codePreview}`)
 
+    /** logs 按 "---" 分隔：客户端返回的顺序是 contextLogs, ---, execLogs */
+    let execLogs: string[] = []
+    let contextLogs: string[] = []
+    if (opts.withLogs !== false && result.logs && result.logs.length > 0) {
+      const sepIdx = result.logs.indexOf('---')
+      if (sepIdx !== -1) {
+        contextLogs = result.logs.slice(0, sepIdx)
+        execLogs = result.logs.slice(sepIdx + 1)
+      } else {
+        execLogs = result.logs
+      }
+    }
+
+    /** exec 期间的日志紧跟 runcode */
+    if (execLogs.length > 0) {
+      lines.push(...execLogs)
+    }
+
     if (result.success) {
       const raw = result.result != null ? String(result.result) : ''
       if (raw !== 'undefined') lines.push(raw)
@@ -84,9 +102,10 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       lines.push(`ERROR: ${result.error || 'unknown'}`)
     }
 
-    if (opts.withLogs !== false && result.logs && result.logs.length > 0) {
-      lines.push('--- logs ---')
-      lines.push(...result.logs)
+    /** 上下文日志放在结果后面 */
+    if (contextLogs.length > 0) {
+      lines.push('--- context logs ---')
+      lines.push(...contextLogs)
     }
 
     if (opts.withPage && result.snapshotText) {
