@@ -4,3 +4,6 @@ CLAUDE.md
 
 .pilot
 dist
+playground/demo/dist
+playground/demo/vue-app
+playground/demo/pilot-client.js

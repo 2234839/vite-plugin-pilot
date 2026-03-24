@@ -23,7 +23,8 @@
   "scripts": {
     "build": "vite build && chmod +x dist/bin/pilot.js",
     "typecheck": "tsc --noEmit",
-    "dev": "vite build && vite --config playground/vite.config.ts --host"
+    "dev": "vite build && vite --config playground/vite.config.ts --host",
+    "build:demo": "npx tsx playground/demo/build.ts"
   },
   "peerDependencies": {
     "@vue/compiler-dom": ">=3.3",

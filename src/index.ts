@@ -104,7 +104,11 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
 
     transformIndexHtml: {
       order: 'post',
-      handler(html) {
+      handler(html, ctx) {
+        /** playground 内的 demo 展示页面不需要注入 pilot 客户端 */
+        const isPlaygroundDemo = ctx.filename?.includes('/playground/demo/') ||
+          ctx.filename?.includes('\\playground\\demo\\')
+        if (isPlaygroundDemo) return html
         return html.replace('</body>', injectScript + '</body>')
       },
     },
