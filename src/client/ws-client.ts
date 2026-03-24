@@ -176,20 +176,17 @@ export const wsClientCode = `
 
   /** 通过 HTTP POST 发送执行结果（失败自动重试一次，确保 CLI 不超时） */
   function postResult(result) {
-    console.log('[Pilot] postResult sending, success=' + result.success + ', instance=' + __pilot_instanceId);
     fetch(apiUrl('/__pilot/result'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId, 'X-Pilot-Title': document.title || '' },
+      headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId, 'X-Pilot-Title': encodeURIComponent(document.title || '') },
       body: JSON.stringify(result)
-    }).then(function(resp) {
-      console.log('[Pilot] postResult response status=' + resp.status);
     }).catch(function(err) {
-      console.log('[Pilot] postResult failed, retrying in 200ms: ' + err.message);
+      console.log('[Pilot] postResult failed: ' + err.message);
       /** 后台 tab 或网络抖动导致首次失败时，200ms 后重试一次 */
       setTimeout(function() {
         fetch(apiUrl('/__pilot/result'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId, 'X-Pilot-Title': document.title || '' },
+          headers: { 'Content-Type': 'application/json', 'X-Pilot-Instance': __pilot_instanceId, 'X-Pilot-Title': encodeURIComponent(document.title || '') },
           body: JSON.stringify(result)
         }).catch(function() {});
       }, 200);
@@ -208,16 +205,12 @@ export const wsClientCode = `
 
   /** 执行代码并发送结果的通用处理 */
   function handleCode(code) {
-    console.log('[Pilot] handleCode received, isExecuting=' + isExecuting + ', code=' + code.slice(0, 40));
     if (isExecuting) {
       pendingCode = code;
-      console.log('[Pilot] handleCode queued (already executing)');
       return;
     }
     isExecuting = true;
-    console.log('[Pilot] execCode starting...');
     var result = execCode(code);
-    console.log('[Pilot] execCode done, typeof result=' + typeof result + ', isPromise=' + (result && typeof result.then === 'function'));
     /** 等待 Vue nextTick + 浏览器渲染后再采集 snapshot，确保 DOM 已更新
      *  后台 tab 时 requestAnimationFrame 不触发，直接发送结果 */
     function sendWithSnapshot(result) {
@@ -225,10 +218,8 @@ export const wsClientCode = `
       function safeSnapshot() {
         try { return window.__pilot_snapshot ? window.__pilot_snapshot() : undefined; } catch(e) { return undefined; }
       }
-      console.log('[Pilot] sendWithSnapshot, hidden=' + document.hidden + ', hasSnapshot=' + !!window.__pilot_snapshot);
       if (window.__pilot_snapshot && !document.hidden) {
         requestAnimationFrame(function() {
-          console.log('[Pilot] rAF callback, sending result');
           result.snapshot = safeSnapshot();
           sendResult(result);
           /** exec 完成，检查是否有排队的代码需要执行 */
@@ -238,14 +229,12 @@ export const wsClientCode = `
       } else if (window.__pilot_snapshot) {
         /** 后台 tab 时 rAF 不触发，用 setTimeout 兜底确保 snapshot 采集 */
         setTimeout(function() {
-          console.log('[Pilot] setTimeout callback (background tab), sending result');
           result.snapshot = safeSnapshot();
           sendResult(result);
           isExecuting = false;
           if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
         }, 50);
       } else {
-        console.log('[Pilot] no snapshot function, sending result directly');
         sendResult(result);
         isExecuting = false;
         if (pendingCode) { var next = pendingCode; pendingCode = null; handleCode(next); }
@@ -268,13 +257,11 @@ export const wsClientCode = `
     window.__pilot_es = es;
 
     es.addEventListener('code', function(e) {
-      console.log('[Pilot] SSE code event received, gen=' + myGen + ', data=' + e.data.slice(0, 40));
       if (myGen !== window.__pilot_gen) return;
       handleCode(e.data);
     });
 
     es.addEventListener('reload', function() {
-      console.log('[Pilot] SSE reload event received, bridge_active=' + !!window.__pilot_bridge_active);
       es.close();
       /** Console Bridge 模式下不 reload（控制台注入的代码会丢失） */
       if (!window.__pilot_bridge_active) {
