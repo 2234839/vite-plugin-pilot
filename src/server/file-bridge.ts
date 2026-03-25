@@ -264,6 +264,12 @@ export class FileBridge {
     }
   }
 
+  /** 删除待执行代码文件（SSE 推送成功后清理） */
+  clearPendingJs(instanceId: string): void {
+    const file = join(this.getInstanceDir(instanceId), PILOT_FILES.pendingJs)
+    if (existsSync(file)) unlinkSync(file)
+  }
+
   /** 检查并清除执行完成标记 */
   clearExecDone(instanceId: string): boolean {
     const file = join(this.getInstanceDir(instanceId), PILOT_FILES.execDone)

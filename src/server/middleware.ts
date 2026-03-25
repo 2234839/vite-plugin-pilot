@@ -62,9 +62,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
-    bridge.writePendingJs(code, instanceId)
-    lastDispatchedCode[instanceId] = code
     broadcastCode(instanceId, code)
+    /** SSE 推送成功后清理 pending.js，避免过期文件残留 */
+    bridge.clearPendingJs(instanceId)
   }
 
   /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用） */
@@ -90,16 +90,17 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       }
     }
 
-    /** exec 期间的日志紧跟 runcode */
-    if (execLogs.length > 0) {
-      lines.push(...execLogs)
-    }
-
+    /** 返回值紧跟 runcode，是 agent 最关心的信息 */
     if (result.success) {
       const raw = result.result != null ? String(result.result) : ''
       if (raw !== 'undefined') lines.push(raw)
     } else {
       lines.push(`ERROR: ${result.error || 'unknown'}`)
+    }
+
+    /** exec 期间的日志放在返回值后面 */
+    if (execLogs.length > 0) {
+      lines.push(...execLogs)
     }
 
     /** 上下文日志放在结果后面 */
