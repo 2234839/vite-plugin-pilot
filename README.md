@@ -53,12 +53,13 @@ npm install -D vite-plugin-pilot
 
 ### Option 1: Vite Plugin Mode
 
-Send the following to your AI agent (paste into Claude Code `CLAUDE.md` or Cursor `.cursorrules`):
+Copy the following and **send it to your AI agent in the chat**:
 
 ```
-Read https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SKILL.md,
-follow its instructions to install vite-plugin-pilot and configure yourself, then start testing browser pages.
+Read https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SETUP.md and follow its steps to configure vite-plugin-pilot for my project, including installing the plugin, configuring vite.config.ts, and writing the usage guide into the project instruction file.
 ```
+
+The agent will automatically install the plugin, configure options, and write the usage guide into your project's instruction file.
 
 ### Option 2: Standalone Server Mode (No Vite Required)
 
