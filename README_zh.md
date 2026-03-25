@@ -136,6 +136,10 @@ pnpm dev
 # /html/ — 原生 JS playground
 ```
 
+## 致谢
+
+特别感谢 [LINUX DO](https://linux.do/) 社区，宝贵的反馈和讨论推动了项目的持续演进。
+
 ## 许可证
 
 MIT

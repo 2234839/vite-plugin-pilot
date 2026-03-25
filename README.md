@@ -141,6 +141,10 @@ pnpm dev
 # /html/ — Vanilla JS playground
 ```
 
+## Thanks
+
+Special thanks to [LINUX DO](https://linux.do/) community for the valuable feedback and discussions that helped shape this project.
+
 ## License
 
 MIT
