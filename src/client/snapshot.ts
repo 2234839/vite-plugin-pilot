@@ -270,16 +270,34 @@ export const snapshotCode = `
     return result;
   };
 
+  /** 按索引获取元素并滚动到视口居中（所有 idx 操作函数的统一入口）
+   *  返回 { el, idx } 或错误字符串，操作函数只需检查返回值即可 */
+  function operateByIndex(i) {
+    var el = window.__pilot_elements[i];
+    if (!el) return { error: 'Element ' + i + ' not found' };
+    if (!el.isConnected) return { error: 'Element ' + i + ' disconnected from DOM' };
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return { el: el, idx: i };
+  }
+
+  /** 按文本匹配元素并滚动到视口居中（所有文本操作函数的统一入口）
+   *  返回 { el, idx, label } 或错误字符串 */
+  function operateByLabel(text, nth, opts) {
+    var result = findByLabel(text, nth, opts);
+    if (result.error) return result;
+    var t = result.target;
+    if (t.el.disabled) return { error: 'Element ' + t.idx + ' "' + t.label + '" is disabled' };
+    t.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return { el: t.el, idx: t.idx, label: t.label };
+  }
+
   /** 点击指定索引的元素（使用 MouseEvent dispatchEvent 兼容 Vue 3 事件委托）
    *  checkbox/radio 使用 checked toggle + input/change 事件（兼容 label 包裹和 Vue v-model）
    */
   window.__pilot_click = function(i) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    /** 检测元素是否仍在 DOM 中（Vue v-if 移除的节点 isConnected=false） */
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
-    /** disabled 元素无法被点击，返回明确错误而非静默失败 */
-    if (el.disabled) return 'Element ' + i + ' is disabled';
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    var el = r.el;
     if (el.type === 'checkbox' || el.type === 'radio') {
       el.checked = !el.checked;
       el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -287,19 +305,16 @@ export const snapshotCode = `
       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     }
     var label = (el.textContent || '').trim().slice(0, 30);
-    return label ? 'Clicked ' + el.tagName + '#' + i + ' "' + label + '"' : 'Clicked ' + el.tagName + '#' + i;
+    return label ? 'Clicked ' + el.tagName + '#' + r.idx + ' "' + label + '"' : 'Clicked ' + el.tagName + '#' + r.idx;
   };
 
   /** 双击指定索引的元素（触发 Vue @dblclick 事件处理） */
   window.__pilot_dblclick = function(i) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
-    /** disabled 元素无法被双击，返回明确错误而非静默失败 */
-    if (el.disabled) return 'Element ' + i + ' is disabled';
-    el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }));
-    var label = (el.textContent || '').trim().slice(0, 30);
-    return label ? 'DblClicked ' + el.tagName + '#' + i + ' "' + label + '"' : 'DblClicked ' + el.tagName + '#' + i;
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    r.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }));
+    var label = (r.el.textContent || '').trim().slice(0, 30);
+    return label ? 'DblClicked ' + r.el.tagName + '#' + r.idx + ' "' + label + '"' : 'DblClicked ' + r.el.tagName + '#' + r.idx;
   };
 
   /** 判断 input 是否为非文本类型（date/color/range/file/time/month/week/datetime-local 等）
@@ -315,16 +330,15 @@ export const snapshotCode = `
    *  用法: __pilot_setValue(i, value, true) — 不 blur（编辑框内连续操作）
    */
   window.__pilot_setValue = function(i, value, noBlur) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    var el = r.el;
     if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
-      return 'Element ' + i + ' is not an input';
+      return 'Element ' + r.idx + ' is not an input';
     }
     el.focus();
     el.value = value;
     if (isChangeInputType(el)) {
-      /** 非文本类型（date/color/range 等）：同时 dispatch input + change 兼容 Vue 3 v-model */
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
@@ -334,37 +348,36 @@ export const snapshotCode = `
       }));
     }
     if (!noBlur) el.blur();
-    return 'Set ' + el.tagName + '#' + i + ' to "' + value + '"';
+    return 'Set ' + el.tagName + '#' + r.idx + ' to "' + value + '"';
   };
 
   /** 设置 select 的选中值（兼容 Vue v-model — 必须触发 change 事件） */
   window.__pilot_selectValue = function(i, value) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (el.tagName !== 'SELECT') {
-      return 'Element ' + i + ' is not a select';
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    if (r.el.tagName !== 'SELECT') {
+      return 'Element ' + r.idx + ' is not a select';
     }
-    el.value = value;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    var opt = el.options[el.selectedIndex];
-    return 'Selected "' + (opt ? opt.text : value) + '" in SELECT#' + i;
+    r.el.value = value;
+    r.el.dispatchEvent(new Event('change', { bubbles: true }));
+    var opt = r.el.options[r.el.selectedIndex];
+    return 'Selected "' + (opt ? opt.text : value) + '" in SELECT#' + r.idx;
   };
 
   /** 在指定元素上触发键盘事件（兼容 Vue @keydown/@keyup 事件处理） */
   window.__pilot_keydown = function(i, key, opts) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
     var o = opts || {};
-    el.dispatchEvent(new KeyboardEvent('keydown', {
+    r.el.dispatchEvent(new KeyboardEvent('keydown', {
       key: key, code: o.code || key, bubbles: true, cancelable: true,
       ctrlKey: !!o.ctrl, shiftKey: !!o.shift, altKey: !!o.alt, metaKey: !!o.meta
     }));
-    el.dispatchEvent(new KeyboardEvent('keyup', {
+    r.el.dispatchEvent(new KeyboardEvent('keyup', {
       key: key, code: o.code || key, bubbles: true, cancelable: true,
       ctrlKey: !!o.ctrl, shiftKey: !!o.shift, altKey: !!o.alt, metaKey: !!o.meta
     }));
-    return 'Keydown "' + key + '" on ' + el.tagName + '#' + i;
+    return 'Keydown "' + key + '" on ' + r.el.tagName + '#' + r.idx;
   };
 
   /** 按文本内容查找元素并触发键盘事件（合并 findByText + keydown 的一步操作）
@@ -508,29 +521,25 @@ export const snapshotCode = `
   }
 
   window.__pilot_clickByText = function(text, nth) {
-    var result = findByLabel(text, nth, { boostTags: CLICKABLE });
-    if (result.error) return result.error;
-    var t = result.target;
-    if (t.el.disabled) return 'Element ' + t.idx + ' "' + t.label + '" is disabled';
-    if (t.el.type === 'checkbox' || t.el.type === 'radio') {
-      t.el.checked = !t.el.checked;
-      t.el.dispatchEvent(new Event('change', { bubbles: true }));
+    var r = operateByLabel(text, nth, { boostTags: CLICKABLE });
+    if (r.error) return r.error;
+    if (r.el.type === 'checkbox' || r.el.type === 'radio') {
+      r.el.checked = !r.el.checked;
+      r.el.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
-      t.el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      r.el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     }
-    return 'Clicked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
+    return 'Clicked ' + r.el.tagName + '#' + r.idx + ' "' + r.label + '"';
   };
 
   /** 按文本双击元素（复用 findByLabel 匹配逻辑）
    *  用法: __pilot_dblclickByText("任务名") — 双击文本匹配的元素
    */
   window.__pilot_dblclickByText = function(text, nth) {
-    var result = findByLabel(text, nth, { boostTags: CLICKABLE });
-    if (result.error) return result.error;
-    var t = result.target;
-    if (t.el.disabled) return 'Element ' + t.idx + ' "' + t.label + '" is disabled';
-    t.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }));
-    return 'DblClicked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
+    var r = operateByLabel(text, nth, { boostTags: CLICKABLE });
+    if (r.error) return r.error;
+    r.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window }));
+    return 'DblClicked ' + r.el.tagName + '#' + r.idx + ' "' + r.label + '"';
   };
 
   /** 按 placeholder 查找 input/textarea 并设置值
@@ -551,12 +560,13 @@ export const snapshotCode = `
       return matches;
     }
     var matches = findAll();
-    if (matches.length === 0 && window.__pilot_snapshot) { matches = findAll(); }
+    if (matches.length === 0 && window.__pilot_snapshot) { window.__pilot_snapshot(); matches = findAll(); }
     if (matches.length === 0) return 'No input found with placeholder "' + ph + '"';
     if (n >= matches.length) return 'No input found with placeholder "' + ph + '" (nth=' + n + ', only ' + matches.length + ' matches)';
     var el = matches[n];
     var matchHint = matches.length > 1 ? ' (' + matches.length + ' matches, nth=' + n + ')' : '';
     var idx = el.getAttribute('data-pilot-idx');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.focus();
     el.value = value;
     if (isChangeInputType(el)) {
@@ -593,11 +603,12 @@ export const snapshotCode = `
       return matches;
     }
     var matches = findAll();
-    if (matches.length === 0 && window.__pilot_snapshot) { matches = findAll(); }
+    if (matches.length === 0 && window.__pilot_snapshot) { window.__pilot_snapshot(); matches = findAll(); }
     if (matches.length === 0) return 'No select found with option "' + optionText + '"';
     if (n >= matches.length) return 'No select found with option "' + optionText + '" (nth=' + n + ', only ' + matches.length + ' matches)';
     var el = matches[n];
     var matchHint = matches.length > 1 ? ' (' + matches.length + ' matches, nth=' + n + ')' : '';
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     /** 重新遍历 options 设置 value（findAll 返回后 DOM 可能因 snapshot 刷新而变化） */
     for (var oi = 0; oi < el.options.length; oi++) {
       if (el.options[oi].text.toLowerCase().indexOf(tLower) !== -1) {
@@ -613,26 +624,24 @@ export const snapshotCode = `
    *  用法: __pilot_check(68)
    */
   window.__pilot_check = function(i) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
-    if (el.type !== 'checkbox' && el.type !== 'radio') return 'Element ' + i + ' is not a checkbox/radio';
-    el.checked = true;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'Checked ' + el.tagName + '#' + i;
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    if (r.el.type !== 'checkbox' && r.el.type !== 'radio') return 'Element ' + r.idx + ' is not a checkbox/radio';
+    r.el.checked = true;
+    r.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'Checked ' + r.el.tagName + '#' + r.idx;
   };
 
   /** 取消勾选指定索引的 checkbox/radio（始终 unchecked，非 toggle）
    *  用法: __pilot_uncheck(68)
    */
   window.__pilot_uncheck = function(i) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
-    if (el.type !== 'checkbox' && el.type !== 'radio') return 'Element ' + i + ' is not a checkbox/radio';
-    el.checked = false;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'Unchecked ' + el.tagName + '#' + i;
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    if (r.el.type !== 'checkbox' && r.el.type !== 'radio') return 'Element ' + r.idx + ' is not a checkbox/radio';
+    r.el.checked = false;
+    r.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'Unchecked ' + r.el.tagName + '#' + r.idx;
   };
 
   /** 按文本勾选 checkbox/radio（始终 checked，不受之前状态影响）
@@ -640,24 +649,22 @@ export const snapshotCode = `
    *  用法: __pilot_checkByText("我同意条款") — 勾选同意条款
    */
   window.__pilot_checkByText = function(text, nth) {
-    var result = findByLabel(text, nth, { filterTag: 'checkbox', typeName: 'checkbox' });
-    if (result.error) return result.error;
-    var t = result.target;
-    t.el.checked = true;
-    t.el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'Checked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
+    var r = operateByLabel(text, nth, { filterTag: 'checkbox', typeName: 'checkbox' });
+    if (r.error) return r.error;
+    r.el.checked = true;
+    r.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'Checked ' + r.el.tagName + '#' + r.idx + ' "' + r.label + '"';
   };
 
   /** 按文本取消勾选 checkbox/radio（始终 unchecked，不受之前状态影响）
    *  用法: __pilot_uncheckByText("Vue")
    */
   window.__pilot_uncheckByText = function(text, nth) {
-    var result = findByLabel(text, nth, { filterTag: 'checkbox', typeName: 'checkbox' });
-    if (result.error) return result.error;
-    var t = result.target;
-    t.el.checked = false;
-    t.el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'Unchecked ' + t.el.tagName + '#' + t.idx + ' "' + t.label + '"';
+    var r = operateByLabel(text, nth, { filterTag: 'checkbox', typeName: 'checkbox' });
+    if (r.error) return r.error;
+    r.el.checked = false;
+    r.el.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'Unchecked ' + r.el.tagName + '#' + r.idx + ' "' + r.label + '"';
   };
 
   /** 异步等待指定毫秒数（仅在 async exec 中使用）
@@ -856,13 +863,12 @@ export const snapshotCode = `
    *  用法: __pilot_hover(100)
    */
   window.__pilot_hover = function(i) {
-    var el = window.__pilot_elements[i];
-    if (!el) return 'Element ' + i + ' not found';
-    if (!el.isConnected) return 'Element ' + i + ' disconnected from DOM';
-    el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, view: window }));
-    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
-    var label = (el.textContent || '').trim().slice(0, 30);
-    return label ? 'Hovered ' + el.tagName + '#' + i + ' "' + label + '"' : 'Hovered ' + el.tagName + '#' + i;
+    var r = operateByIndex(i);
+    if (r.error) return r.error;
+    r.el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, view: window }));
+    r.el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+    var label = (r.el.textContent || '').trim().slice(0, 30);
+    return label ? 'Hovered ' + r.el.tagName + '#' + r.idx + ' "' + label + '"' : 'Hovered ' + r.el.tagName + '#' + r.idx;
   };
 
   /** 获取指定元素的位置和尺寸信息（用于布局调试）

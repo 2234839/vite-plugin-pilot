@@ -421,12 +421,19 @@ export function filterCompact(data: Record<string, unknown>): Record<string, unk
     lci++
   }
 
-  /** 合并所有 h2/h3 为一个 section 列表（节省 ~20% token） */
+  /** 合并所有 h2/h3 为一个 section 列表（节省 ~20% token）
+   *  超过 15 个 section 时只显示前 10 个 + 概览提示（避免长 section 行浪费 token） */
   const h2s = liCollapsed.filter((e: Record<string, unknown>) => e.tag === 'h2' || e.tag === 'h3')
   if (h2s.length > 1) {
     const nonH2 = liCollapsed.filter((e: Record<string, unknown>) => e.tag !== 'h2' && e.tag !== 'h3')
     const texts = h2s.map((e: Record<string, unknown>) => e.text as string)
-    nonH2.unshift({ tag: 'sections', text: texts.join('|') })
+    let sectionText: string
+    if (texts.length > 15) {
+      sectionText = texts.slice(0, 10).join('|') + '|... (+' + (texts.length - 10) + ')'
+    } else {
+      sectionText = texts.join('|')
+    }
+    nonH2.unshift({ tag: 'sections', text: sectionText })
     return { ...data, els: nonH2 }
   }
 

@@ -47,10 +47,11 @@ npx pilot help                    # 查看辅助函数列表
 
 **输出格式**：`run` 命令的输出按优先级排列：
 1. `--- runcode ---` 执行的代码预览
-2. 返回值（成功时）或 `ERROR:` 错误信息 — agent 最关心的信息，紧跟 runcode
+2. 返回值（成功时）或 `ERROR:` 错误信息 + 修复建议 — agent 最关心的信息，紧跟 runcode
 3. `--- exec logs ---` 执行期间的控制台日志（仅在有日志时输出）
 4. `--- context logs ---` 执行前的上下文日志（仅在有 exec 日志时输出）
-5. `--- page snapshot ---` 页面快照（默认附带）
+5. `--- page snapshot ---` 页面快照（默认附带，`nopage` 模式下 exec 失败时也自动附带帮助诊断）
+6. `--- hint ---` 辅助函数提示（仅在检测到原生 DOM 操作且未使用过 `__pilot_` 函数时出现，使用一次后永久消失）
 
 纯操作（如 `__pilot_clickByText("登录")`）无返回值时，不输出空的 undefined，直接跳到日志或快照。
 
@@ -66,8 +67,8 @@ npx pilot help                    # 查看辅助函数列表
 |------|------|
 | `__pilot_clickByText(text, nth?)` | 按文本点击元素 |
 | `__pilot_dblclickByText(text, nth?)` | 按文本双击元素 |
-| `__pilot_typeByPlaceholder(ph, value)` | 在输入框输入（触发 input 事件，兼容 v-model） |
-| `__pilot_setValueByPlaceholder(ph, value, nth?)` | 设置输入框值（仅改 DOM，不触发 input 事件） |
+| `__pilot_typeByPlaceholder(ph, value)` | 输入并按 Enter（触发 input 事件） |
+| `__pilot_setValueByPlaceholder(ph, value, nth?)` | 设置输入框值（触发 input 事件，不触发 Enter） |
 | `__pilot_selectValueByText(text, nth?)` | 选择下拉框选项 |
 | `__pilot_checkByText(text, nth?)` | 勾选复选框 |
 | `__pilot_uncheckByText(text, nth?)` | 取消勾选复选框 |
@@ -83,8 +84,8 @@ npx pilot help                    # 查看辅助函数列表
 |------|------|
 | `__pilot_click(i)` | 点击元素 |
 | `__pilot_dblclick(i)` | 双击元素 |
-| `__pilot_type(i, v)` | 输入值（触发 input 事件） |
-| `__pilot_setValue(i, v)` | 设置值（仅改 DOM） |
+| `__pilot_type(i, v)` | 输入并按 Enter（触发 input 事件） |
+| `__pilot_setValue(i, v)` | 设置值（触发 input 事件，不触发 Enter） |
 | `__pilot_hover(i)` | 悬停元素 |
 | `__pilot_scrollIntoView(i)` | 滚动到元素 |
 | `__pilot_getRect(i)` | 获取元素位置和尺寸 |
@@ -107,7 +108,7 @@ npx pilot help                    # 查看辅助函数列表
 
 - **同一 exec 完成相关操作**（填写+提交），跨 exec Vue/React 状态可能丢失
 - 多步操作间 `await __pilot_wait(0)` 让 Vue scheduler 处理响应式更新
-- **始终用 `typeByPlaceholder`**：Vue/React v-model 需要 input 事件，`type` 触发 input 事件，`setValue` 只改 DOM
+- **始终用 `typeByPlaceholder`**：Vue/React v-model 需要 input 事件，`type` 触发 input 事件+Enter 键，`setValue` 触发 input 事件但不触发 Enter（表单填写推荐 `setValueByPlaceholder`）
 - `npx pilot page cached` 读缓存（0.03s），不需要最新状态时用
 - **clickByText 同名按钮**：多个 section 有同名按钮时（如多个"重置"），匹配 score 最高的（可能不是目标 section 的），应用 compact 中的 `#idx` 精确操作
 - **clickByText + v-if 时序**：modal 未渲染时可能匹配到其他元素，先用 `await __pilot_waitFor("目标文本")` 等待渲染完成再点击

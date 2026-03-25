@@ -37,13 +37,8 @@
 ````markdown
 ## 浏览器测试（vite-plugin-pilot）
 
-使用 vite-plugin-pilot 操控浏览器页面进行测试。已安装并配置。
-
-- `npx pilot run '代码'` — 执行 JS 并获取结果+日志+页面快照
-- `npx pilot page` — 查看页面状态
-- `npx pilot status` — 查看已连接的实例
-
-详见 https://raw.githubusercontent.com/2234839/vite-plugin-pilot/master/SKILL.md
+已安装。`npx pilot run '代码'` 执行 JS（返回结果+日志+快照）、`npx pilot page` 页面状态、`npx pilot help` 辅助函数列表。
+常用：`__pilot_clickByText("文本")` 点击、`__pilot_typeByPlaceholder("提示文字", "值")` 输入、`__pilot_waitFor("文本")` 等待、`__pilot_findByText("文本")` 查找。snapshot 中 `#N` 是元素索引。
 ````
 
 **重要**：不要删除或覆盖文件中的已有内容，只追加。

@@ -58,8 +58,18 @@ function httpGet(path: string, port: number, instanceId: string, timeoutMs = 300
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       req.destroy()
+      restoreEnv()
       resolve(null)
     }, timeoutMs)
+
+    /** 临时设置 NO_PROXY 绕过代理（Node.js 24 的 http 模块会读取 http_proxy 环境变量） */
+    const savedNoProxy = process.env.NO_PROXY
+    const savedNoProxyLower = process.env.no_proxy
+    process.env.NO_PROXY = process.env.no_proxy = '*'
+    function restoreEnv() {
+      if (savedNoProxy === undefined) delete process.env.NO_PROXY; else process.env.NO_PROXY = savedNoProxy
+      if (savedNoProxyLower === undefined) delete process.env.no_proxy; else process.env.no_proxy = savedNoProxyLower
+    }
 
     const req = http.get({
       hostname: '127.0.0.1',
@@ -67,7 +77,9 @@ function httpGet(path: string, port: number, instanceId: string, timeoutMs = 300
       path,
       headers: { 'X-Pilot-Instance': instanceId },
       timeout: timeoutMs,
+      agent: false,
     }, (res) => {
+      restoreEnv()
       let body = ''
       res.on('data', (c: Buffer) => { body += c })
       res.on('end', () => {
@@ -77,10 +89,12 @@ function httpGet(path: string, port: number, instanceId: string, timeoutMs = 300
     })
     req.on('error', () => {
       clearTimeout(timer)
+      restoreEnv()
       resolve(null)
     })
     req.on('timeout', () => {
       clearTimeout(timer)
+      restoreEnv()
       req.destroy()
       resolve(null)
     })
@@ -709,8 +723,9 @@ async function main() {
 
 文本匹配（推荐）:
   __pilot_clickByText(text, nth?)      按文本点击元素
-  __pilot_typeByPlaceholder(ph, value) 在输入框输入（触发 input 事件）
-  __pilot_setValueByPlaceholder(ph, value, nth?) 设置输入框值
+  __pilot_dblclickByText(text, nth?)   按文本双击元素
+  __pilot_typeByPlaceholder(ph, value) 输入并按 Enter（触发 input 事件）
+  __pilot_setValueByPlaceholder(ph, value, nth?) 设置值（触发 input 事件，不触发 Enter）
   __pilot_selectValueByText(text, nth?)  选择下拉框选项
   __pilot_checkByText(text, nth?)      勾选复选框
   __pilot_findByText(text)             查找元素 → [{idx, tag, text}]
@@ -720,7 +735,7 @@ async function main() {
 按索引（compact 中的 #N）:
   __pilot_click(i)        点击元素
   __pilot_setValue(i, v)  设置值
-  __pilot_type(i, v)      输入值
+  __pilot_type(i, v)      输入并按 Enter
   __pilot_dblclick(i)     双击元素
   __pilot_hover(i)        悬停元素
 

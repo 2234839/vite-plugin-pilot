@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http'
-import { watch as fsWatch, type FSWatcher } from 'fs'
+import { watch as fsWatch, watchFile, existsSync, type FSWatcher } from 'fs'
+import { resolve } from 'path'
 import type { ResolvedPilotOptions, ExecResult, ElementInfo } from '../types'
 import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
@@ -38,6 +39,26 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     bridge.writeVersion(pilotVersion)
   }
 
+  /** 监控 version.txt 变化（pnpm build 后更新），推送 SSE reload 事件给浏览器
+   *  使用 watchFile（polling-based）而非 fsWatch（inotify），WSL2 上 inotify 不可靠 */
+  let lastReloadVersion = pilotVersion || ''
+  try {
+    const versionFile = resolve(options.pilotDir, 'version.txt')
+    if (existsSync(versionFile)) {
+      watchFile(versionFile, { interval: 500 }, (cur, prev) => {
+        if (cur.mtimeMs === prev.mtimeMs) return
+        const newVersion = bridge.readVersion()
+        if (!newVersion || newVersion === lastReloadVersion) return
+        lastReloadVersion = newVersion
+        for (const connections of Object.values(sseConnections)) {
+          for (const res of connections) {
+            res.write('event: reload\ndata: 1\n\n')
+          }
+        }
+      })
+    }
+  } catch { /* version.txt 不存在时忽略 */ }
+
   /** SSE 连接池（按实例隔离） */
   const sseConnections: Record<string, Array<ServerResponse>> = {}
 
@@ -66,6 +87,53 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     /** SSE 推送成功后清理 pending.js，避免过期文件残留 */
     bridge.clearPendingJs(instanceId)
   }
+
+  /** 根据 locale 决定提示语言 */
+  const isZh = options.locale !== 'en'
+
+  /** 原生 DOM 操作模式 → 对应的 pilot 辅助函数提示（根据 locale 切换语言） */
+  const DOM_HINTS: Array<{ pattern: RegExp; hintZh: string; hintEn: string }> = [
+    { pattern: /document\.(querySelector|getElementById|getElementsBy)/, hintZh: '__pilot_findByText("text") → [{idx, tag, text}]', hintEn: '__pilot_findByText("text") → [{idx, tag, text}]' },
+    { pattern: /\.click\(\)/, hintZh: '__pilot_clickByText("text") 或 __pilot_click(idx)', hintEn: '__pilot_clickByText("text") or __pilot_click(idx)' },
+    { pattern: /\.value\s*=/, hintZh: '__pilot_typeByPlaceholder("placeholder", "value") 或 __pilot_setValue(i, v)', hintEn: '__pilot_typeByPlaceholder("ph", "value") or __pilot_setValue(i, v)' },
+    { pattern: /dispatchEvent.*Mouse/, hintZh: '__pilot_clickByText / __pilot_dblclickByText', hintEn: '__pilot_clickByText / __pilot_dblclickByText' },
+    { pattern: /setTimeout.*\d{3,}/, hintZh: '__pilot_waitFor("text") 比 setTimeout 更可靠', hintEn: '__pilot_waitFor("text") is more reliable than setTimeout' },
+  ]
+
+  /** 常见错误模式 → 修复建议（帮助 agent 快速定位和解决问题） */
+  const ERROR_HINTS: Array<{ pattern: RegExp; hintZh: string; hintEn: string }> = [
+    { pattern: /Cannot read propert.*null/i, hintZh: '元素未找到，使用 __pilot_findByText 或 __pilot_waitFor 确认元素存在', hintEn: 'Element not found. Use __pilot_findByText or __pilot_waitFor to confirm the element exists' },
+    { pattern: /Cannot read propert.*undefined/i, hintZh: '返回值为 undefined，检查选择器或使用 __pilot_snapshot() 查看页面状态', hintEn: 'Result is undefined. Check selector or use __pilot_snapshot() to inspect page state' },
+    { pattern: /is not a function/i, hintZh: '方法不存在，检查拼写或使用 `npx pilot help` 查看可用函数', hintEn: 'Method not found. Check spelling or use `npx pilot help` for available functions' },
+    { pattern: /Element.*disconnected/i, hintZh: '元素已脱离 DOM，页面可能已更新，请重新获取元素', hintEn: 'Element disconnected from DOM. Page may have updated, re-fetch the element' },
+    { pattern: /No element found/i, hintZh: '未找到匹配元素，使用 __pilot_findByText 查看可用元素', hintEn: 'No matching element. Use __pilot_findByText to list available elements' },
+  ]
+
+  /** 检测代码中的原生 DOM 操作并生成辅助函数提示
+   *  只在代码不包含 __pilot_ 且匹配到原生 DOM 模式时才生成提示 */
+  function buildApiHint(code: string): string {
+    if (!code || code.includes('__pilot_')) return ''
+    const matched: string[] = []
+    for (const { pattern, hintZh, hintEn } of DOM_HINTS) {
+      const hint = isZh ? hintZh : hintEn
+      if (pattern.test(code) && !matched.includes(hint)) matched.push(hint)
+    }
+    if (matched.length === 0) return ''
+    const title = isZh ? 'pilot 提供了辅助函数来操作 DOM:' : 'pilot has helper functions for common DOM operations:'
+    return '\n--- hint ---\n' + title + '\n  ' + matched.join('\n  ')
+  }
+
+  /** 根据错误信息生成修复建议 */
+  function buildErrorHint(error: string): string {
+    if (!error) return ''
+    for (const { pattern, hintZh, hintEn } of ERROR_HINTS) {
+      if (pattern.test(error)) return isZh ? hintZh : hintEn
+    }
+    return ''
+  }
+
+  /** 是否已提示过辅助函数（一旦 agent 使用 __pilot_ 函数就停止提示，dev server 重启后重置） */
+  let hintDismissed = false
 
   /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用）
    *  输出结构：runcode → 返回值/ERROR → exec 日志 → 上下文日志 → 页面快照
@@ -100,7 +168,11 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       const raw = String(result.result ?? '')
       if (raw && raw !== 'undefined') lines.push(raw)
     } else {
-      lines.push(`ERROR: ${result.error || 'unknown'}`)
+      const errorMsg = result.error || 'unknown'
+      lines.push(`ERROR: ${errorMsg}`)
+      /** 错误场景附加修复建议，帮助 agent 快速定位问题 */
+      const errHint = buildErrorHint(errorMsg)
+      if (errHint) lines.push(errHint)
     }
 
     /** exec 期间的日志放在返回值后面（仅在有返回值或日志时添加分隔） */
@@ -115,9 +187,22 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       lines.push(...contextLogs)
     }
 
-    if (opts.withPage && result.snapshotText) {
+    /** 附带页面快照：默认附带（withPage=true），exec 失败时即使 nopage 也附带（帮助 agent 诊断失败原因） */
+    const shouldShowPage = opts.withPage || (!result.success && result.snapshotText)
+    if (shouldShowPage && result.snapshotText) {
       lines.push('--- page snapshot ---')
       lines.push(result.snapshotText)
+    }
+
+    /** 智能方法提示：检测代码中是否使用了原生 DOM 操作，推荐 pilot 辅助函数
+     *  一旦 agent 使用了 __pilot_ 函数就停止提示（已掌握 API）
+     *  dev server 重启后重置（hintDismissed 是内存状态） */
+    if (codeSource.includes('__pilot_')) {
+      hintDismissed = true
+    }
+    if (!hintDismissed) {
+      const hint = buildApiHint(codeSource)
+      if (hint) lines.push(hint)
     }
 
     return lines.join('\n')
@@ -222,7 +307,6 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       if (endpoint === PILOT_ENDPOINTS.sse && req.method === 'GET') {
         const url = new URL(req.url, 'http://localhost')
         const sseInstance = url.searchParams.get('instance') || instanceId
-        const clientVersion = url.searchParams.get('version')
         const pageTitle = decodeURIComponent(url.searchParams.get('title') || '')
 
         lastBrowserActivity[sseInstance] = Date.now()
@@ -233,19 +317,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         const clientType = (url.searchParams.get('type') as InstanceType) || 'vite'
         bridge.writeActiveInstance(sseInstance, referer, clientType, pageTitle)
 
-        /** 版本不匹配时立即返回 reload 指令然后关闭连接
+        /** 版本检查在心跳和 fs.watch 中处理，SSE 连接时不做检查
+         *  因为 injectScript 中的版本号是 configureServer 时固定的，build 后不匹配是正常的
          *  Console Bridge / Userscript 实例跳过版本检查（无法 reload，会丢失注入代码） */
-        if (clientVersion && pilotVersion && clientVersion !== pilotVersion && clientType === 'vite') {
-          res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-          })
-          res.write('event: reload\ndata: 1\n\n')
-          res.end()
-          return
-        }
 
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -363,70 +437,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           /** exec 完成后清除已广播标记，允许后续相同 code 的请求被正常推送 */
           delete lastDispatchedCode[instanceId]
           /** 通知队首等待者 */
-          const waiters = execWaiters[instanceId]
-          if (waiters && waiters.length > 0) {
-            const waiter = waiters.shift()!
-            clearTimeout(waiter.timer)
-            const wRes = waiter.res
-            const wOpts = waiterOptions.get(wRes)
-
-            if (wOpts?.withSnapshot && result) {
-              /** POST /exec?wait=1&snapshot=1：返回 JSON 结果附带 snapshot */
-              const response = { ...result, snapshot: clientSnapshot ?? undefined }
-              wRes.writeHead(200, { 'Content-Type': 'application/json' })
-              wRes.end(JSON.stringify(response))
-            } else if (wOpts?.type === 'run') {
-              wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-              wRes.end(formatRunResult(result, wOpts))
-            } else if (wOpts?.type === 'page') {
-              /** GET /__pilot/page?fresh=1 请求：返回纯文本 compact snapshot */
-              if (result?.success && typeof result.result === 'string') {
-                try {
-                  const data = JSON.parse(typeof JSON.parse(result.result) === 'string' ? JSON.parse(result.result) : result.result)
-                  const rawEls = data.els ?? data.visibleElements
-                  if (Array.isArray(rawEls) && rawEls.length > 0) {
-                    const { fullText } = getCompactText(data)
-                    bridge.writeCompactSnapshot(fullText, instanceId)
-                    wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-                    wRes.end(fullText)
-                  }
-                } catch {
-                  wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-                  wRes.end(result.result)
-                }
-              } else {
-                const cached = bridge.readCompactSnapshot(instanceId)
-                wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-                wRes.end(cached || 'NO_SNAPSHOT')
-              }
-            } else if (wOpts?.type === 'snapshot' && result?.success && typeof result.result === 'string') {
-              /** GET /snapshot?fresh=1 请求：解包双层序列化的 snapshot */
-              try {
-                const inner = JSON.parse(result.result)
-                const data = typeof inner === 'string' ? JSON.parse(inner) : inner
-                if (wOpts.compact) {
-                  const { meta, text, fullText } = getCompactText(data)
-                  bridge.writeCompactSnapshot(fullText, instanceId)
-                  wRes.writeHead(200, { 'Content-Type': 'application/json' })
-                  wRes.end(JSON.stringify({ ...meta, text }))
-                } else {
-                  wRes.writeHead(200, { 'Content-Type': 'application/json' })
-                  wRes.end(JSON.stringify(data))
-                }
-              } catch {
-                wRes.writeHead(200, { 'Content-Type': 'application/json' })
-                wRes.end(result.result)
-              }
-            } else if (result) {
-              /** 非 snapshot 模式：移除客户端附带的 snapshot，避免不必要的数据传输 */
-              delete result.snapshot
-              wRes.writeHead(200, { 'Content-Type': 'application/json' })
-              wRes.end(JSON.stringify(result))
-            } else {
-              wRes.writeHead(504, { 'Content-Type': 'application/json' })
-              wRes.end(JSON.stringify({ error: 'Execution timeout', success: false }))
-            }
-          }
+          notifyWaiter(instanceId, result, clientSnapshot)
           return { success: true }
         })
         return
@@ -499,7 +510,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         const fresh = url.searchParams.get('fresh') !== null
         const pageInstance = url.searchParams.get('instance') || instanceId
 
-        if (!lastBrowserActivity[pageInstance]) {
+        if (!lastBrowserActivity[pageInstance] || Date.now() - lastBrowserActivity[pageInstance] > 60_000) {
           res.writeHead(503, { 'Content-Type': 'text/plain' })
           res.end('NO_BROWSER')
           return
@@ -543,8 +554,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
         const withPage = url.searchParams.get('page') !== null
         const withLogs = url.searchParams.get('logs') !== null
 
-        /** 快速失败：从未有浏览器连接时立即返回 */
-        if (!lastBrowserActivity[runInstance]) {
+        /** 快速失败：从未有浏览器连接或浏览器超过 60s 不活跃时立即返回 */
+        const lastSeen = lastBrowserActivity[runInstance]
+        if (!lastSeen || Date.now() - lastSeen > 60_000) {
           res.writeHead(503, { 'Content-Type': 'text/plain' })
           res.end('NO_BROWSER')
           return
@@ -660,20 +672,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
             bridge.writeResultTxt(result, imgInstance)
             bridge.writeExecDone(imgInstance)
             /** 通知队首等待者 */
-            const waiters = execWaiters[imgInstance]
-            if (waiters && waiters.length > 0) {
-              const waiter = waiters.shift()!
-              clearTimeout(waiter.timer)
-              const wRes = waiter.res
-              const wOpts = waiterOptions.get(wRes)
-              if (wOpts?.type === 'run') {
-                wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-                wRes.end(formatRunResult(result, wOpts))
-              } else if (result) {
-                wRes.writeHead(200, { 'Content-Type': 'application/json' })
-                wRes.end(JSON.stringify(result))
-              }
-            }
+            notifyWaiter(imgInstance, result, clientSnapshot)
           } catch { /* ignore malformed data */ }
         }
         /** 返回 1x1 透明 GIF（Image 加载成功） */
@@ -735,6 +734,78 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     } else {
       res.writeHead(504, { 'Content-Type': 'text/plain' })
       res.end('NO_SNAPSHOT')
+    }
+  }
+
+  /** 通知队首等待者执行完成（POST /result 和 GET /result-img 共用）
+   *  根据 waiter 选项决定响应格式：纯文本（run）、JSON（default/snapshot）或 compact（page） */
+  function notifyWaiter(
+    targetId: string,
+    result: ExecResult,
+    snapshot: unknown,
+  ): void {
+    const waiters = execWaiters[targetId]
+    if (!waiters || waiters.length === 0) return
+    const waiter = waiters.shift()!
+    clearTimeout(waiter.timer)
+    const wRes = waiter.res
+    const wOpts = waiterOptions.get(wRes)
+
+    if (wOpts?.withSnapshot && result) {
+      /** POST /exec?wait=1&snapshot=1：返回 JSON 结果附带 snapshot */
+      const response = { ...result, snapshot: snapshot ?? undefined }
+      wRes.writeHead(200, { 'Content-Type': 'application/json' })
+      wRes.end(JSON.stringify(response))
+    } else if (wOpts?.type === 'run') {
+      wRes.writeHead(200, { 'Content-Type': 'text/plain' })
+      wRes.end(formatRunResult(result, wOpts))
+    } else if (wOpts?.type === 'page') {
+      /** GET /__pilot/page?fresh=1 请求：返回纯文本 compact snapshot */
+      if (result?.success && typeof result.result === 'string') {
+        try {
+          const data = JSON.parse(typeof JSON.parse(result.result) === 'string' ? JSON.parse(result.result) : result.result)
+          const rawEls = data.els ?? data.visibleElements
+          if (Array.isArray(rawEls) && rawEls.length > 0) {
+            const { fullText } = getCompactText(data)
+            bridge.writeCompactSnapshot(fullText, targetId)
+            wRes.writeHead(200, { 'Content-Type': 'text/plain' })
+            wRes.end(fullText)
+          }
+        } catch {
+          wRes.writeHead(200, { 'Content-Type': 'text/plain' })
+          wRes.end(result.result)
+        }
+      } else {
+        const cached = bridge.readCompactSnapshot(targetId)
+        wRes.writeHead(200, { 'Content-Type': 'text/plain' })
+        wRes.end(cached || 'NO_SNAPSHOT')
+      }
+    } else if (wOpts?.type === 'snapshot' && result?.success && typeof result.result === 'string') {
+      /** GET /snapshot?fresh=1 请求：解包双层序列化的 snapshot */
+      try {
+        const inner = JSON.parse(result.result)
+        const data = typeof inner === 'string' ? JSON.parse(inner) : inner
+        if (wOpts.compact) {
+          const { meta, text, fullText } = getCompactText(data)
+          bridge.writeCompactSnapshot(fullText, targetId)
+          wRes.writeHead(200, { 'Content-Type': 'application/json' })
+          wRes.end(JSON.stringify({ ...meta, text }))
+        } else {
+          wRes.writeHead(200, { 'Content-Type': 'application/json' })
+          wRes.end(JSON.stringify(data))
+        }
+      } catch {
+        wRes.writeHead(200, { 'Content-Type': 'application/json' })
+        wRes.end(result.result)
+      }
+    } else if (result) {
+      /** 非 snapshot 模式：移除客户端附带的 snapshot，避免不必要的数据传输 */
+      delete result.snapshot
+      wRes.writeHead(200, { 'Content-Type': 'application/json' })
+      wRes.end(JSON.stringify(result))
+    } else {
+      wRes.writeHead(504, { 'Content-Type': 'application/json' })
+      wRes.end(JSON.stringify({ error: 'Execution timeout', success: false }))
     }
   }
 }
