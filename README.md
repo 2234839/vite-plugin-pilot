@@ -15,40 +15,6 @@ Let AI agents (Claude Code, Cursor, etc.) **see, interact with, and verify** bro
 
 **[简体中文](./README_zh.md)** | English
 
-## Features
-
-- **Zero Config** — Drop-in Vite plugin, works with any Vite project (Vue, React, vanilla JS, etc.)
-- **Standalone Server** — `npx pilot server` works without Vite, connects to any webpage
-- **Compact Snapshot** — Page state serialized into ~80 lines of text, optimized for LLM context windows
-- **Multi-Instance** — Each browser tab is independently tracked, switch freely with `instance:xxx` (supports prefix matching) or `PILOT_INSTANCE`
-- **Instance Persistence** — Page refreshes reuse the same instance ID, no stale instance buildup
-- **Auto Reload** — Browser auto-refreshes when dev server restarts
-- **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
-- **Element Inspector** — Alt+Click any element to generate a prompt with full context for AI agents
-- **Tampermonkey Support** — Install userscript to run on any page automatically
-- **Channel Server** — Push prompts directly to Claude Code session via hook-based integration
-
-## Why Not Chrome DevTools MCP?
-
-| | vite-plugin-pilot | Chrome DevTools MCP |
-|---|---|---|
-| **Connects via** | Dev server injection (SSE + HTTP API) | Chrome DevTools Protocol (CDP) |
-| **Requires CDP port** | No | Yes (`--remote-debugging-port`) |
-| **WPS Add-ins** | Yes | No (no CDP access) |
-| **Electron / embedded browsers** | Yes | Maybe (needs CDP enabled) |
-| **Remote debugging** | Yes (browser on any device) | Limited (same network, CDP exposed) |
-| **Framework awareness** | Vue/React v-model, scheduler | DOM-only |
-| **Zero external deps** | Pure Dev Server injection | Needs Puppeteer/CDP client |
-| **Production sites** | Yes (standalone server + bridge.js) | Needs CDP exposed |
-
-## Installation
-
-```bash
-pnpm add -D vite-plugin-pilot
-# or
-npm install -D vite-plugin-pilot
-```
-
 ## Quick Start
 
 ### Option 1: Vite Plugin Mode
@@ -76,6 +42,32 @@ npx pilot run '1+1'              # Execute JS
 npx pilot page                  # View page snapshot
 npx pilot status                # List connected instances
 ```
+
+## Features
+
+- **Zero Config** — Drop-in Vite plugin, works with any Vite project (Vue, React, vanilla JS, etc.)
+- **Standalone Server** — `npx pilot server` works without Vite, connects to any webpage
+- **Compact Snapshot** — Page state serialized into ~80 lines of text, optimized for LLM context windows
+- **Multi-Instance** — Each browser tab is independently tracked, switch freely with `instance:xxx` (supports prefix matching) or `PILOT_INSTANCE`
+- **Instance Persistence** — Page refreshes reuse the same instance ID, no stale instance buildup
+- **Auto Reload** — Browser auto-refreshes when dev server restarts
+- **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
+- **Element Inspector** — Alt+Click any element to generate a prompt with full context for AI agents
+- **Tampermonkey Support** — Install userscript to run on any page automatically
+- **Channel Server** — Push prompts directly to Claude Code session via hook-based integration
+
+## Why Not Chrome DevTools MCP?
+
+| | vite-plugin-pilot | Chrome DevTools MCP |
+|---|---|---|
+| **Connects via** | Dev server injection (SSE + HTTP API) | Chrome DevTools Protocol (CDP) |
+| **Requires CDP port** | No | Yes (`--remote-debugging-port`) |
+| **WPS Add-ins** | Yes | No (no CDP access) |
+| **Electron / embedded browsers** | Yes | Maybe (needs CDP enabled) |
+| **Remote debugging** | Yes (browser on any device) | Limited (same network, CDP exposed) |
+| **Framework awareness** | Vue/React v-model, scheduler | DOM-only |
+| **Zero external deps** | Pure Dev Server injection | Needs Puppeteer/CDP client |
+| **Production sites** | Yes (standalone server + bridge.js) | Needs CDP exposed |
 
 ## Browser-to-Claude Code (Channel Server)
 

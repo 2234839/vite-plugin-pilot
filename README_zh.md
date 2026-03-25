@@ -10,40 +10,6 @@
 
 English | **[简体中文](./README_zh.md)**
 
-## 特性
-
-- **零配置** — Vite 插件即插即用，支持任何 Vite 项目（Vue、React、原生 JS 等）
-- **独立运行** — 不依赖 Vite，`npx pilot server` 即可连接任意网页
-- **紧凑快照** — 页面状态序列化为 ~80 行文本，针对 LLM 上下文窗口优化
-- **多实例** — 每个浏览器 tab 独立追踪，通过 `instance:xxx`（支持前缀模糊匹配）或 `PILOT_INSTANCE` 自由切换
-- **实例持久化** — 页面刷新复用同一 instance ID，不会堆积过期实例
-- **自动刷新** — Dev server 重启后浏览器自动刷新
-- **Vue/React 兼容** — `typeByPlaceholder` 触发 input 事件，兼容 v-model
-- **Element Inspector** — Alt+Click 选中元素，生成含完整信息的提示词，供 AI Agent 使用
-- **Tampermonkey 支持** — 安装 userscript 后自动在所有页面运行
-- **Channel Server** — 浏览器端提示词可直接推送到 Claude Code session（通过 UserPromptSubmit hook）
-
-## 为什么不直接用 Chrome DevTools MCP？
-
-| | vite-plugin-pilot | Chrome DevTools MCP |
-|---|---|---|
-| **连接方式** | Dev server 注入（SSE + HTTP API） | Chrome DevTools Protocol (CDP) |
-| **需要 CDP 端口** | 不需要 | 需要（`--remote-debugging-port`） |
-| **WPS 加载项** | 支持 | 不支持（无法访问 CDP） |
-| **Electron / 嵌入式浏览器** | 支持 | 不确定（需开启 CDP） |
-| **远程调试** | 支持（浏览器可在任意设备） | 受限（需同一网络 + 暴露 CDP） |
-| **框架感知** | Vue/React v-model、scheduler | 仅操作 DOM |
-| **外部依赖** | 纯 Dev Server 注入，零依赖 | 需要 Puppeteer / CDP 客户端 |
-| **线上页面** | 支持（独立 Server + bridge.js） | 需要暴露 CDP |
-
-## 安装
-
-```bash
-pnpm add -D vite-plugin-pilot
-# 或
-npm install -D vite-plugin-pilot
-```
-
 ## 快速开始
 
 ### 方式一：Vite 插件模式
@@ -71,6 +37,32 @@ npx pilot run '1+1'              # 执行 JS
 npx pilot page                  # 查看页面快照
 npx pilot status                # 查看连接的实例列表
 ```
+
+## 特性
+
+- **零配置** — Vite 插件即插即用，支持任何 Vite 项目（Vue、React、原生 JS 等）
+- **独立运行** — 不依赖 Vite，`npx pilot server` 即可连接任意网页
+- **紧凑快照** — 页面状态序列化为 ~80 行文本，针对 LLM 上下文窗口优化
+- **多实例** — 每个浏览器 tab 独立追踪，通过 `instance:xxx`（支持前缀模糊匹配）或 `PILOT_INSTANCE` 自由切换
+- **实例持久化** — 页面刷新复用同一 instance ID，不会堆积过期实例
+- **自动刷新** — Dev server 重启后浏览器自动刷新
+- **Vue/React 兼容** — `typeByPlaceholder` 触发 input 事件，兼容 v-model
+- **Element Inspector** — Alt+Click 选中元素，生成含完整信息的提示词，供 AI Agent 使用
+- **Tampermonkey 支持** — 安装 userscript 后自动在所有页面运行
+- **Channel Server** — 浏览器端提示词可直接推送到 Claude Code session（通过 UserPromptSubmit hook）
+
+## 为什么不直接用 Chrome DevTools MCP？
+
+| | vite-plugin-pilot | Chrome DevTools MCP |
+|---|---|---|
+| **连接方式** | Dev server 注入（SSE + HTTP API） | Chrome DevTools Protocol (CDP) |
+| **需要 CDP 端口** | 不需要 | 需要（`--remote-debugging-port`） |
+| **WPS 加载项** | 支持 | 不支持（无法访问 CDP） |
+| **Electron / 嵌入式浏览器** | 支持 | 不确定（需开启 CDP） |
+| **远程调试** | 支持（浏览器可在任意设备） | 受限（需同一网络 + 暴露 CDP） |
+| **框架感知** | Vue/React v-model、scheduler | 仅操作 DOM |
+| **外部依赖** | 纯 Dev Server 注入，零依赖 | 需要 Puppeteer / CDP 客户端 |
+| **线上页面** | 支持（独立 Server + bridge.js） | 需要暴露 CDP |
 
 ## 浏览器直连 Claude Code（Channel Server）
 
