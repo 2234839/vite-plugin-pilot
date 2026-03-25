@@ -67,7 +67,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     bridge.clearPendingJs(instanceId)
   }
 
-  /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用） */
+  /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用）
+   *  输出结构：runcode → 返回值/ERROR → exec 日志 → 上下文日志 → 页面快照
+   *  设计原则：agent 最关心的是「执行是否成功」和「返回了什么」，放在最前面 */
   function formatRunResult(result: ExecResult | null | undefined, opts: WaiterOptions): string {
     if (!result) return 'TIMEOUT'
 
@@ -90,21 +92,25 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       }
     }
 
-    /** 返回值紧跟 runcode，是 agent 最关心的信息 */
+    /** 返回值紧跟 runcode，是 agent 最关心的信息
+     *  客户端 serializeResult 将 undefined 序列化为字符串 "undefined"，
+     *  纯操作（如 __pilot_clickByText）执行成功但无返回值时 result 为 "undefined"，
+     *  过滤为空避免噪音。有实际返回值时原样输出，null 保留（可能是有效的查询结果） */
     if (result.success) {
-      const raw = result.result != null ? String(result.result) : ''
-      if (raw !== 'undefined') lines.push(raw)
+      const raw = String(result.result ?? '')
+      if (raw && raw !== 'undefined') lines.push(raw)
     } else {
       lines.push(`ERROR: ${result.error || 'unknown'}`)
     }
 
-    /** exec 期间的日志放在返回值后面 */
+    /** exec 期间的日志放在返回值后面（仅在有返回值或日志时添加分隔） */
     if (execLogs.length > 0) {
+      lines.push('--- exec logs ---')
       lines.push(...execLogs)
     }
 
-    /** 上下文日志放在结果后面 */
-    if (contextLogs.length > 0) {
+    /** 上下文日志放在最后（仅在 exec 日志存在时才输出，避免纯操作场景的噪音） */
+    if (contextLogs.length > 0 && execLogs.length > 0) {
       lines.push('--- context logs ---')
       lines.push(...contextLogs)
     }

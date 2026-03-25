@@ -447,7 +447,7 @@ async function main() {
 
       if (showLogs) {
         const logs = readFileSafe(join(instanceDir, PILOT_FILES.recentLogs))
-        if (logs) output += '\n--- logs ---\n' + logs
+        if (logs) output += '\n--- exec logs ---\n' + logs
       }
       if (showPage) {
         const execResult = readJsonSafe(join(instanceDir, 'exec-result.json'))

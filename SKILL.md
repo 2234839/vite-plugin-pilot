@@ -45,21 +45,73 @@ npx pilot help                    # 查看辅助函数列表
 
 **使用模式**：`run 'code'` 默认返回结果+日志+页面快照，一步即可看到完整信息。`page` 单独查看 compact snapshot。
 
+**输出格式**：`run` 命令的输出按优先级排列：
+1. `--- runcode ---` 执行的代码预览
+2. 返回值（成功时）或 `ERROR:` 错误信息 — agent 最关心的信息，紧跟 runcode
+3. `--- exec logs ---` 执行期间的控制台日志（仅在有日志时输出）
+4. `--- context logs ---` 执行前的上下文日志（仅在有 exec 日志时输出）
+5. `--- page snapshot ---` 页面快照（默认附带）
+
+纯操作（如 `__pilot_clickByText("登录")`）无返回值时，不输出空的 undefined，直接跳到日志或快照。
+
 **实例选择**：多个浏览器 tab 打开时，执行结果末尾会显示可用实例列表（`--- instances ---`），用 `←` 标记当前实例。每个实例有 type 标识（`[vite]` / `[console]` / `[userscript]`）、hostname label 和页面 title。切换实例用 `instance:xxx` 参数（支持前缀模糊匹配，如 `instance:1316` 匹配 `131646c7`）或 `PILOT_INSTANCE` 环境变量。`npx pilot status` 查看所有实例详情（含 type、url、title、lastSeen）。
 
 ## 辅助函数
 
 以下函数在 `npx pilot run '...'` 中作为浏览器端 JS 执行，完整列表见 `npx pilot help`。
 
-**文本匹配**（推荐）：`__pilot_clickByText(t,n)` `__pilot_typeByPlaceholder(p,v)` `__pilot_findByText(t)` `__pilot_waitFor(t,timeout,disappear)` `__pilot_waitEnabled(t,timeout)`
-**按索引**：`__pilot_click(i)` `__pilot_setValue(i,v)` `__pilot_type(i,v)` `__pilot_dblclick(i)`
+### 文本匹配（推荐，每次重新搜索 DOM，比索引更稳定）
+
+| 函数 | 说明 |
+|------|------|
+| `__pilot_clickByText(text, nth?)` | 按文本点击元素 |
+| `__pilot_dblclickByText(text, nth?)` | 按文本双击元素 |
+| `__pilot_typeByPlaceholder(ph, value)` | 在输入框输入（触发 input 事件，兼容 v-model） |
+| `__pilot_setValueByPlaceholder(ph, value, nth?)` | 设置输入框值（仅改 DOM，不触发 input 事件） |
+| `__pilot_selectValueByText(text, nth?)` | 选择下拉框选项 |
+| `__pilot_checkByText(text, nth?)` | 勾选复选框 |
+| `__pilot_uncheckByText(text, nth?)` | 取消勾选复选框 |
+| `__pilot_checkMultipleByText([t1, t2, ...])` | 批量勾选多个复选框 |
+| `__pilot_keydownByText(text, key)` | 在元素上触发按键 |
+| `__pilot_findByText(text)` | 查找元素 → `[{idx, tag, text}]` |
+| `__pilot_waitFor(text, timeout?, disappear?)` | 等待文本出现/消失 |
+| `__pilot_waitEnabled(text, timeout?)` | 等待禁用元素变为可用 |
+
+### 按索引（compact snapshot 中的 `#N`，适合精确操作）
+
+| 函数 | 说明 |
+|------|------|
+| `__pilot_click(i)` | 点击元素 |
+| `__pilot_dblclick(i)` | 双击元素 |
+| `__pilot_type(i, v)` | 输入值（触发 input 事件） |
+| `__pilot_setValue(i, v)` | 设置值（仅改 DOM） |
+| `__pilot_hover(i)` | 悬停元素 |
+| `__pilot_scrollIntoView(i)` | 滚动到元素 |
+| `__pilot_getRect(i)` | 获取元素位置和尺寸 |
+| `__pilot_check(i)` | 勾选复选框 |
+| `__pilot_uncheck(i)` | 取消勾选复选框 |
+
+### 其他
+
+| 函数 | 说明 |
+|------|------|
+| `__pilot_wait(ms)` | 等待毫秒 |
+| `__pilot_snapshot()` | 获取完整 JSON 快照 |
+
+**compact snapshot 格式**：`tag#idx[val=V][check=N][type=T][ph=P][disabled] text`
+- `#idx` 是元素的序号，可直接传给 `__pilot_click(idx)` 等函数
+- 交互元素（button/input/select/textarea）和有 id 的元素会显示 idx
+- 带 `[disabled]` 标记的元素不可操作
 
 ## 关键注意
 
 - **同一 exec 完成相关操作**（填写+提交），跨 exec Vue/React 状态可能丢失
 - 多步操作间 `await __pilot_wait(0)` 让 Vue scheduler 处理响应式更新
-- **始终用 `typeByPlaceholder`**：Vue/React v-model 需要 input 事件
+- **始终用 `typeByPlaceholder`**：Vue/React v-model 需要 input 事件，`type` 触发 input 事件，`setValue` 只改 DOM
 - `npx pilot page cached` 读缓存（0.03s），不需要最新状态时用
+- **clickByText 同名按钮**：多个 section 有同名按钮时（如多个"重置"），匹配 score 最高的（可能不是目标 section 的），应用 compact 中的 `#idx` 精确操作
+- **clickByText + v-if 时序**：modal 未渲染时可能匹配到其他元素，先用 `await __pilot_waitFor("目标文本")` 等待渲染完成再点击
+- **Vue checkbox**：始终用 `__pilot_checkByText`/`__pilot_uncheckByText`，不要手动设置 `el.checked`
 
 ## Element Inspector（Alt+Click）
 
