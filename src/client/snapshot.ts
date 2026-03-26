@@ -12,6 +12,10 @@ export const snapshotCode = `
 (function() {
   /** 存储采集到的元素引用，供 __pilot_click / __pilot_setValue 使用 */
   window.__pilot_elements = {};
+  /** 记录本次 exec 中操作过的元素 idx（服务端据此在 compact snapshot 中标记上下文） */
+  window.__pilot_operated = [];
+  /** 记录本次 exec 中操作过的元素文本标签（用于匹配 compact 中被合并的 checkbox/radio） */
+  window.__pilot_operatedLabels = [];
 
   /** 判断元素是否为叶子节点（无可见子元素） */
   var INVISIBLE_TAGS = { SCRIPT:1, STYLE:1, OPTION:1, OPTGROUP:1 };
@@ -399,6 +403,9 @@ export const snapshotCode = `
     if (!el.isConnected) return { error: 'Element ' + i + ' disconnected from DOM' };
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     highlightElement(el);
+    window.__pilot_operated.push(i);
+    var label = getElementLabel(el);
+    if (label) window.__pilot_operatedLabels.push(label);
     return { el: el, idx: i };
   }
 
@@ -411,6 +418,8 @@ export const snapshotCode = `
     if (t.el.disabled) return { error: 'Element ' + t.idx + ' "' + t.label + '" is disabled' };
     t.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     highlightElement(t.el);
+    window.__pilot_operated.push(t.idx);
+    if (t.label) window.__pilot_operatedLabels.push(t.label);
     return { el: t.el, idx: t.idx, label: t.label };
   }
 
@@ -691,6 +700,9 @@ export const snapshotCode = `
     var idx = el.getAttribute('data-pilot-idx');
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     highlightElement(el);
+    window.__pilot_operated.push(parseInt(idx));
+    var phLabel = el.placeholder || getElementLabel(el);
+    if (phLabel) window.__pilot_operatedLabels.push(phLabel);
     el.focus();
     el.value = value;
     if (isChangeInputType(el)) {
@@ -734,6 +746,9 @@ export const snapshotCode = `
     var matchHint = matches.length > 1 ? ' (' + matches.length + ' matches, nth=' + n + ')' : '';
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     highlightElement(el);
+    window.__pilot_operated.push(parseInt(el.getAttribute('data-pilot-idx')));
+    var selLabel = el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : optionText;
+    window.__pilot_operatedLabels.push(selLabel);
     /** 重新遍历 options 设置 value（findAll 返回后 DOM 可能因 snapshot 刷新而变化） */
     for (var oi = 0; oi < el.options.length; oi++) {
       if (el.options[oi].text.toLowerCase().indexOf(tLower) !== -1) {

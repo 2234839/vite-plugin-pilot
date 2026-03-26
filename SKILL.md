@@ -53,6 +53,8 @@ npx pilot help                    # 查看辅助函数列表
 5. `--- page snapshot ---` 页面快照（默认附带，`nopage` 模式下 exec 失败时也自动附带帮助诊断）
 6. `--- hint ---` 辅助函数提示（仅在检测到原生 DOM 操作且未使用过 `__pilot_` 函数时出现，使用一次后永久消失）
 
+**上下文聚焦**：操作元素时（如 clickByText、typeByPlaceholder），snapshot 自动聚焦到操作区域——被操作的元素用 `→` 标记，上下各 4 行保留，远离操作的区域用 `·` 折叠。无元素操作时返回完整 snapshot。
+
 纯操作（如 `__pilot_clickByText("登录")`）无返回值时，不输出空的 undefined，直接跳到日志或快照。
 
 **实例选择**：多个浏览器 tab 打开时，执行结果末尾会显示可用实例列表（`--- instances ---`），用 `←` 标记当前实例。每个实例有 type 标识（`[vite]` / `[console]` / `[userscript]`）、hostname label 和页面 title。切换实例用 `instance:xxx` 参数（支持前缀模糊匹配，如 `instance:1316` 匹配 `131646c7`）或 `PILOT_INSTANCE` 环境变量。`npx pilot status` 查看所有实例详情（含 type、url、title、lastSeen）。

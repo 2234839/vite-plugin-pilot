@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-pilot",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "AI Agent 驾驶浏览器的导航工具 — 打通 浏览器运行时 → Dev Server → 源码 → IDE 的完整链路",
   "type": "module",
   "bin": {
@@ -25,7 +25,8 @@
     "build": "vite build && chmod +x dist/bin/pilot.js && node scripts/write-inject-bundle.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "vite build && chmod +x dist/bin/pilot.js && npx vite --config playground/vite.config.ts --host --port 5173 --strictPort",
-    "build:demo": "npx tsx playground/demo/build.ts"
+    "build:demo": "npx tsx playground/demo/build.ts",
+    "test": "npx tsx scripts/test.ts"
   },
   "dependencies": {},
   "peerDependencies": {

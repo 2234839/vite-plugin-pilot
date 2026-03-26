@@ -521,6 +521,80 @@ export interface CompactResult {
 }
 
 /**
+ * 在 compact 文本中标记操作过的元素（→ 前缀）
+ * 同时折叠远离操作元素的区域（用 · 省略）
+ * @param fullText getCompactText 返回的完整文本
+ * @param operated 本次 exec 中操作过的元素 idx 数组
+ * @param operatedLabels 本次 exec 中操作过的元素文本标签（用于匹配合并行如 checkbox/radio）
+ */
+export function annotateCompactText(fullText: string, operated: number[], operatedLabels?: string[]): string {
+  if ((!operated || operated.length === 0) && (!operatedLabels || operatedLabels.length === 0)) return fullText
+  const operatedSet = new Set(operated ?? [])
+  const labelSet = new Set(operatedLabels ?? [])
+  const lines = fullText.split('\n')
+  const headerEnd = lines.findIndex(l => l.startsWith('# ') === false && l.trim() !== '')
+  /** header 行（url/title/sections）始终保留 */
+  const headerLines = headerEnd > 0 ? lines.slice(0, headerEnd) : []
+  const bodyLines = headerEnd > 0 ? lines.slice(headerEnd) : lines
+
+  /** 找到包含 operated idx 的行号，或包含 operatedLabels 文本的行号 */
+  const operatedLineIdxs: number[] = []
+  for (let i = 0; i < bodyLines.length; i++) {
+    for (const idx of operatedSet) {
+      /** 匹配 #N 格式的 idx（交互元素） */
+      if (bodyLines[i].includes('#' + idx + ' ')) {
+        operatedLineIdxs.push(i)
+      }
+    }
+    /** 匹配 operatedLabels 中的文本（仅匹配 checkbox/radio 合并行，避免误匹配 span 等元素） */
+    if (labelSet.size > 0 && (bodyLines[i].startsWith('checkbox') || bodyLines[i].startsWith('radio'))) {
+      for (const label of labelSet) {
+        if (bodyLines[i].includes(label)) {
+          operatedLineIdxs.push(i)
+        }
+      }
+    }
+  }
+
+  /** 构建上下文窗口：每个 operated 行上下各 CONTEXT_RANGE 行可见 */
+  const CONTEXT_RANGE = 4
+  const visibleSet = new Set<number>()
+  for (const oi of operatedLineIdxs) {
+    for (let j = Math.max(0, oi - CONTEXT_RANGE); j <= Math.min(bodyLines.length - 1, oi + CONTEXT_RANGE); j++) {
+      visibleSet.add(j)
+    }
+  }
+
+  /** 始终保留 sections 行和 header 行 */
+  const result: string[] = [...headerLines]
+  let lastVisible = -1
+  for (let i = 0; i < bodyLines.length; i++) {
+    if (visibleSet.has(i)) {
+      /** 如果前面有被折叠的行，插入省略提示 */
+      if (lastVisible >= 0 && i - lastVisible > 1) {
+        result.push('  ·')
+      }
+      /** 为 operated 行添加 → 前缀 */
+      if (operatedLineIdxs.includes(i)) {
+        result.push('→ ' + bodyLines[i])
+      } else {
+        result.push('  ' + bodyLines[i])
+      }
+      lastVisible = i
+    } else if (bodyLines[i].startsWith('sections ')) {
+      /** sections 行始终保留 */
+      if (lastVisible >= 0 && i - lastVisible > 1) {
+        result.push('  ·')
+      }
+      result.push('  ' + bodyLines[i])
+      lastVisible = i
+    }
+  }
+
+  return result.join('\n')
+}
+
+/**
  * compact 过滤 + 文本序列化（一站式调用）
  * 返回带 meta 头部的完整文本（供 AI cat 读取）
  */

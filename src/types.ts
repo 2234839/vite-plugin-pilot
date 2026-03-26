@@ -45,6 +45,10 @@ export interface ExecResult {
   snapshotText?: string
   /** exec 期间产生的控制台日志（紧凑格式：[TYPE] message），agent 无需额外 bash 调用 */
   logs?: string[]
+  /** 本次 exec 中操作过的元素 idx（服务端据此在 compact snapshot 中标记 → ） */
+  operated?: number[]
+  /** 本次 exec 中操作过的元素文本标签（用于匹配 compact 中被合并的 checkbox/radio 等元素） */
+  operatedLabels?: string[]
 }
 
 /** 元素信息（客户端采集） */

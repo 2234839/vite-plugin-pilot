@@ -6,7 +6,7 @@ import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
 import type { InstanceType } from './file-bridge'
 import { generateElementPrompt } from '../prompt/generator'
-import { getCompactText } from './compact'
+import { getCompactText, annotateCompactText } from './compact'
 import { buildBridgeScript } from './bridge'
 import { buildUserscript } from './userscript'
 
@@ -191,7 +191,10 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     const shouldShowPage = opts.withPage || (!result.success && result.snapshotText)
     if (shouldShowPage && result.snapshotText) {
       lines.push('--- page snapshot ---')
-      lines.push(result.snapshotText)
+      /** 有操作元素时，标记上下文并折叠远离操作的区域 */
+      const operated = result.operated as number[] | undefined
+      const operatedLabels = result.operatedLabels as string[] | undefined
+      lines.push(annotateCompactText(result.snapshotText, operated ?? [], operatedLabels))
     }
 
     /** 智能方法提示：检测代码中是否使用了原生 DOM 操作，推荐 pilot 辅助函数

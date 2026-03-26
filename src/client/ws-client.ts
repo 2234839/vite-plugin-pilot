@@ -34,12 +34,18 @@ export const wsClientCode = `
   }
 
   function makeResult(code, result, success, error, logsSinceExec) {
+    var operated = window.__pilot_operated && window.__pilot_operated.length > 0
+      ? window.__pilot_operated.slice() : undefined;
+    var operatedLabels = window.__pilot_operatedLabels && window.__pilot_operatedLabels.length > 0
+      ? window.__pilot_operatedLabels.slice() : undefined;
     return {
       code: code,
       result: success ? serializeResult(result) : undefined,
       success: success,
       error: error || undefined,
-      logs: logsSinceExec && logsSinceExec.length > 0 ? logsSinceExec : undefined
+      logs: logsSinceExec && logsSinceExec.length > 0 ? logsSinceExec : undefined,
+      operated: operated,
+      operatedLabels: operatedLabels
     };
   }
 
@@ -102,6 +108,9 @@ export const wsClientCode = `
   }
 
   function execCode(code) {
+    /** 清空操作元素记录（每次 exec 重新开始） */
+    window.__pilot_operated = [];
+    window.__pilot_operatedLabels = [];
     /** 检测是否需要 async 执行（显式 await 或调用返回 Promise 的辅助函数） */
     var hasAwait = /\\bawait\\b/.test(code) || code.indexOf('__pilot_waitFor(') !== -1 || code.indexOf('__pilot_wait(') !== -1
       || code.indexOf('__pilot_typeByPlaceholder(') !== -1 || code.indexOf('__pilot_type(') !== -1
