@@ -1,11 +1,15 @@
 # vite-plugin-pilot
 
-> **AI-Powered Browser Navigation** — Bridge the gap between AI agents and browser runtime via SSE + HTTP API.
+> As one user put it: **"DevTools MCP, but from the inside."** Instead of connecting via Chrome's debugging protocol, it plants an agent inside your page. AI operates the browser through it.
 
-Let AI agents (Claude Code, Cursor, etc.) **see, interact with, and verify** browser pages through a compact snapshot format and simple JS helper functions. No Puppeteer, no Playwright.
+**In plain English**: lets AI **see** and **interact** with your browser pages.
+
+When you're coding with Claude Code or Cursor, you used to switch to the browser, refresh, click around to check your changes. Now AI can do all that itself — read page content, click buttons, fill forms, verify that everything looks right. It's like giving AI eyes to see your webpage and hands to operate it.
+
+**What it's NOT**: not Puppeteer, not Playwright, not Selenium. It doesn't spin up a "simulated browser" — it works inside your **real browser**. You can literally watch it click around.
 
 **Two modes**:
-- **Vite Plugin** (recommended) — Auto-injects client code, works with `pnpm dev`
+- **Vite Plugin** (recommended) — Auto-injects client code, works with `pnpm dev`, zero setup
 - **Standalone Server** — `npx pilot server` connects to any webpage via bridge.js or Tampermonkey userscript (including production sites)
 
 [![npm version](https://img.shields.io/npm/v/vite-plugin-pilot.svg)](https://www.npmjs.com/package/vite-plugin-pilot)
@@ -43,31 +47,29 @@ npx pilot page                  # View page snapshot
 npx pilot status                # List connected instances
 ```
 
-## Features
+## What It Does
 
 - **Zero Config** — Drop-in Vite plugin, works with any Vite project (Vue, React, vanilla JS, etc.)
-- **Standalone Server** — `npx pilot server` works without Vite, connects to any webpage
-- **Compact Snapshot** — Page state serialized into ~80 lines of text, optimized for LLM context windows
-- **Multi-Instance** — Each browser tab is independently tracked, switch freely with `instance:xxx` (supports prefix matching) or `PILOT_INSTANCE`
-- **Instance Persistence** — Page refreshes reuse the same instance ID, no stale instance buildup
-- **Auto Reload** — Browser auto-refreshes when dev server restarts
-- **Vue/React Aware** — `typeByPlaceholder` dispatches input events for v-model compatibility
-- **Element Inspector** — Alt+Click any element to generate a prompt with full context for AI agents
-- **Tampermonkey Support** — Install userscript to run on any page automatically
-- **Channel Server** — Push prompts directly to Claude Code session via hook-based integration
+- **Works on Any Website** — No Vite? No problem. Tampermonkey or a console script connects to any page
+- **AI-Readable Pages** — Compresses page state into ~80 lines of text, easy on token budgets
+- **Multi-Tab Support** — 10 tabs open? AI can switch between them freely
+- **Vue/React Aware** — Handles v-model and framework quirks so forms actually work
+- **Alt+Click Inspector** — Click any element to generate a prompt telling AI "change this"
+- **Browser Push-Back** — Send prompts from the browser directly to Claude Code, no copy-paste
 
-## Why Not Chrome DevTools MCP?
+## How's This Different from Chrome DevTools MCP?
+
+DevTools MCP connects via Chrome's debugging protocol — the official backdoor. Pilot injects code into the page — the insider approach. This means it can reach places DevTools MCP can't:
 
 | | vite-plugin-pilot | Chrome DevTools MCP |
 |---|---|---|
-| **Connects via** | Dev server injection (SSE + HTTP API) | Chrome DevTools Protocol (CDP) |
-| **Requires CDP port** | No | Yes (`--remote-debugging-port`) |
-| **WPS Add-ins** | Yes | No (no CDP access) |
-| **Electron / embedded browsers** | Yes | Maybe (needs CDP enabled) |
-| **Remote debugging** | Yes (browser on any device) | Limited (same network, CDP exposed) |
-| **Framework awareness** | Vue/React v-model, scheduler | DOM-only |
-| **Zero external deps** | Pure Dev Server injection | Needs Puppeteer/CDP client |
-| **Production sites** | Yes (standalone server + bridge.js) | Needs CDP exposed |
+| **How it connects** | Injects code into the page (SSE + HTTP) | Chrome DevTools Protocol (CDP) |
+| **Needs CDP port?** | No | Yes, plus startup flags |
+| **WPS Add-in browser** | Works | Doesn't work (no CDP) |
+| **Electron / embedded browsers** | Works | Uncertain |
+| **Production websites** | Yes (just install Tampermonkey) | Need to expose CDP |
+| **Knows Vue/React?** | Yes, handles v-model, scheduler | No, DOM only |
+| **Dependencies** | None, pure injection | Puppeteer / CDP client |
 
 ## Browser-to-Claude Code (Channel Server)
 

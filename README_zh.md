@@ -1,14 +1,18 @@
 # vite-plugin-pilot
 
-> **AI 驱动的浏览器导航工具** — 通过 SSE + HTTP API 打通 AI Agent 与浏览器运行时的链路。
+> 猫哥评价：**内鬼版的 DevTools MCP** —— 不走 CDP，直接往你网页里塞个内应，AI 通过它来操作页面。
 
-让 AI Agent（Claude Code、Cursor 等）通过紧凑快照格式和简单的 JS 辅助函数**查看、交互和验证**浏览器页面。无需 Puppeteer、无需 Playwright。
+简单说就是：**让 AI 能「看到」和「操作」你的浏览器页面**。
+
+你用 Claude Code / Cursor 写前端代码时，改完之后想看效果，以前得自己切到浏览器刷新、点点点。现在 AI 可以自己干这些事 —— 它能读取页面上的内容、点击按钮、填写表单、验证效果对不对。就像给 AI 装了一双看网页的眼睛和一双操作网页的手。
+
+**它不是什么**：不是 Puppeteer、不是 Playwright、不是 Selenium。它不需要启动一个「模拟浏览器」，而是直接在你**真实的浏览器**里干活，你甚至可以在旁边看着它操作。
 
 **两种运行模式**：
-- **Vite 插件模式**（推荐）— 自动注入客户端代码，`pnpm dev` 启动即可
-- **独立 Server 模式** — `npx pilot server` 启动独立 HTTP server，配合 bridge.js 或 Tampermonkey 脚本连接任意网页（包括线上页面）
+- **Vite 插件模式**（推荐）— `pnpm dev` 启动项目时自动注入，零配置，AI 立刻就能操作你的页面
+- **独立 Server 模式** — 不依赖 Vite，`npx pilot server` + 一段小脚本，连接任意网页（包括线上网站）
 
-English | **[简体中文](./README_zh.md)**
+**[English](./README.md)** | 简体中文
 
 ## 快速开始
 
@@ -38,31 +42,29 @@ npx pilot page                  # 查看页面快照
 npx pilot status                # 查看连接的实例列表
 ```
 
-## 特性
+## 它能干嘛
 
-- **零配置** — Vite 插件即插即用，支持任何 Vite 项目（Vue、React、原生 JS 等）
-- **独立运行** — 不依赖 Vite，`npx pilot server` 即可连接任意网页
-- **紧凑快照** — 页面状态序列化为 ~80 行文本，针对 LLM 上下文窗口优化
-- **多实例** — 每个浏览器 tab 独立追踪，通过 `instance:xxx`（支持前缀模糊匹配）或 `PILOT_INSTANCE` 自由切换
-- **实例持久化** — 页面刷新复用同一 instance ID，不会堆积过期实例
-- **自动刷新** — Dev server 重启后浏览器自动刷新
-- **Vue/React 兼容** — `typeByPlaceholder` 触发 input 事件，兼容 v-model
-- **Element Inspector** — Alt+Click 选中元素，生成含完整信息的提示词，供 AI Agent 使用
-- **Tampermonkey 支持** — 安装 userscript 后自动在所有页面运行
-- **Channel Server** — 浏览器端提示词可直接推送到 Claude Code session（通过 UserPromptSubmit hook）
+- **零配置接入** — Vite 插件即插即用，Vue、React、原生 JS 什么项目都行
+- **操控任意网页** — 不依赖 Vite 的话，也能连线上网站（通过 Tampermonkey 或控制台脚本）
+- **AI 看得懂页面** — 把页面压缩成 ~80 行文本给 AI 看，不浪费 token
+- **多 tab 支持** — 开了 10 个 tab 也没事，AI 可以切换着操作
+- **Vue/React 友好** — 自动处理 v-model 这些框架特性，不会填了表单但状态没更新
+- **Alt+Click 元素检查** — 鼠标点到哪个元素，一键生成提示词发给 AI，告诉它「改这个」
+- **浏览器反推消息** — 浏览器里看到的可以直接推给 Claude Code，不用手动复制粘贴
 
-## 为什么不直接用 Chrome DevTools MCP？
+## 跟 Chrome DevTools MCP 有啥区别？
+
+DevTools MCP 走的是 Chrome 调试协议（CDP），像官方后门；pilot 走的是往页面里注入代码，像内鬼。所以它能连一些 DevTools MCP 连不上的场景：
 
 | | vite-plugin-pilot | Chrome DevTools MCP |
 |---|---|---|
-| **连接方式** | Dev server 注入（SSE + HTTP API） | Chrome DevTools Protocol (CDP) |
-| **需要 CDP 端口** | 不需要 | 需要（`--remote-debugging-port`） |
-| **WPS 加载项** | 支持 | 不支持（无法访问 CDP） |
-| **Electron / 嵌入式浏览器** | 支持 | 不确定（需开启 CDP） |
-| **远程调试** | 支持（浏览器可在任意设备） | 受限（需同一网络 + 暴露 CDP） |
-| **框架感知** | Vue/React v-model、scheduler | 仅操作 DOM |
-| **外部依赖** | 纯 Dev Server 注入，零依赖 | 需要 Puppeteer / CDP 客户端 |
-| **线上页面** | 支持（独立 Server + bridge.js） | 需要暴露 CDP |
+| **连接方式** | 页面内注入代码（SSE + HTTP） | Chrome 调试协议（CDP） |
+| **需要开 CDP 端口吗** | 不用 | 要，还得加启动参数 |
+| **WPS 加载项里的浏览器** | 能用 | 用不了（没有 CDP） |
+| **Electron / 嵌入式浏览器** | 能用 | 不确定 |
+| **连线上网站** | 能（Tampermonkey 一装就行） | 得暴露 CDP 端口 |
+| **懂 Vue/React 吗** | 懂，v-model、scheduler 都处理了 | 不懂，只操作 DOM |
+| **依赖** | 零依赖，纯注入 | 需要 Puppeteer / CDP 客户端 |
 
 ## 浏览器直连 Claude Code（Channel Server）
 
