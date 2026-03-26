@@ -12,6 +12,8 @@ export interface PilotOptions {
   maxResultSize?: number
   /** Alt+Click 元素检查器，默认开启。设为 false 禁用 */
   inspector?: boolean
+  /** 操作元素时显示高亮聚焦效果（蓝色虚线边框），默认开启 */
+  highlight?: boolean
   /** 语言环境，默认 'zh'。支持 'zh' | 'en' */
   locale?: 'zh' | 'en'
   /** 是否检查 npm 新版本，默认 true */

@@ -21,6 +21,7 @@ const options = {
   execTimeout: 30000,
   maxResultSize: 262144,
   inspector: true,
+  highlight: true,
   locale: 'zh',
   pilotDir,
 }

@@ -38,6 +38,7 @@ const pilotClient = `// [Pilot] Demo Client — standalone, no server needed
 (function() {
   window.__pilot_instanceId = 'demo';
   window.__PILOT_VERSION__ = 'demo';
+  window.__PILOT_HIGHLIGHT__ = true;
 
   /* === Log Collector === */
   ${replacePlaceholders(logCollectorCode).trim()}

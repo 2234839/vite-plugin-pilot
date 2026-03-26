@@ -270,6 +270,127 @@ export const snapshotCode = `
     return result;
   };
 
+  /** 注入 highlight 动画 keyframes（仅注入一次） */
+  var _highlightStyleInjected = false;
+  function ensureHighlightStyle() {
+    if (_highlightStyleInjected) return;
+    _highlightStyleInjected = true;
+    var style = document.createElement('style');
+    style.textContent =
+      '@keyframes __pilot-corner-in{' +
+        '0%{opacity:0;transform:scale(1.8)}' +
+        '60%{opacity:1}' +
+        '100%{opacity:1;transform:scale(1)}' +
+      '}';
+    document.head.appendChild(style);
+  }
+
+  /** 创建单个 L 形角标 */
+  function createCorner(position) {
+    var corner = document.createElement('div');
+    var size = 10;
+    var thickness = 2;
+    var styles = {
+      'position': 'absolute',
+      'width': size + 'px',
+      'height': size + 'px',
+      'pointer-events': 'none',
+    };
+    if (position === 'tl') {
+      styles.top = '0'; styles.left = '0';
+      styles.borderTop = thickness + 'px solid rgba(59,130,246,0.9)';
+      styles.borderLeft = thickness + 'px solid rgba(59,130,246,0.9)';
+    } else if (position === 'tr') {
+      styles.top = '0'; styles.right = '0';
+      styles.borderTop = thickness + 'px solid rgba(59,130,246,0.9)';
+      styles.borderRight = thickness + 'px solid rgba(59,130,246,0.9)';
+    } else if (position === 'bl') {
+      styles.bottom = '0'; styles.left = '0';
+      styles.borderBottom = thickness + 'px solid rgba(59,130,246,0.9)';
+      styles.borderLeft = thickness + 'px solid rgba(59,130,246,0.9)';
+    } else {
+      styles.bottom = '0'; styles.right = '0';
+      styles.borderBottom = thickness + 'px solid rgba(59,130,246,0.9)';
+      styles.borderRight = thickness + 'px solid rgba(59,130,246,0.9)';
+    }
+    for (var k in styles) corner.style[k] = styles[k];
+    return corner;
+  }
+
+  /** 等待元素滚动完成（scrollend 或 500ms fallback），然后执行回调 */
+  function waitForScrollEnd(el, cb) {
+    if ('onscrollend' in el) {
+      el.addEventListener('scrollend', cb, { once: true });
+      setTimeout(cb, 500);
+    } else {
+      setTimeout(cb, 350);
+    }
+  }
+
+  /** 在目标元素上显示聚焦锁定动效（四角 L 形角标从外向内收缩 + 蓝色虚线边框，跟随元素位置，1.5s 后淡出移除）
+   *  先显示半透明边框跟随滚动，滚动完成后再播放角标锁定动画
+   *  用 ResizeObserver + scroll 事件跟踪元素位置变化，高亮消失时自动断开 observer
+   *  由 __PILOT_HIGHLIGHT__ 配置控制是否启用 */
+  function highlightElement(el) {
+    if (!__PILOT_HIGHLIGHT__) return;
+    ensureHighlightStyle();
+
+    /** 外层容器：半透明背景 + 虚线边框（滚动期间可见） */
+    var overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed;z-index:2147483640;pointer-events:none;' +
+      'border:2px dashed rgba(59,130,246,0.5);background:rgba(59,130,246,0.06);' +
+      'border-radius:2px;transition:opacity 0.3s ease;';
+    document.body.appendChild(overlay);
+
+    /** 四角角标容器（初始隐藏，滚动完成后显示） */
+    var cornerWrap = document.createElement('div');
+    cornerWrap.style.cssText =
+      'position:fixed;z-index:2147483641;pointer-events:none;opacity:0;';
+    cornerWrap.appendChild(createCorner('tl'));
+    cornerWrap.appendChild(createCorner('tr'));
+    cornerWrap.appendChild(createCorner('bl'));
+    cornerWrap.appendChild(createCorner('br'));
+    document.body.appendChild(cornerWrap);
+
+    /** 更新 overlay 和角标位置 */
+    function updatePosition() {
+      var rect = el.getBoundingClientRect();
+      overlay.style.top = rect.top + 'px';
+      overlay.style.left = rect.left + 'px';
+      overlay.style.width = rect.width + 'px';
+      overlay.style.height = rect.height + 'px';
+      cornerWrap.style.top = rect.top + 'px';
+      cornerWrap.style.left = rect.left + 'px';
+      cornerWrap.style.width = rect.width + 'px';
+      cornerWrap.style.height = rect.height + 'px';
+    }
+
+    var resizeObserver = new ResizeObserver(updatePosition);
+    resizeObserver.observe(el);
+    window.addEventListener('scroll', updatePosition, true);
+    updatePosition();
+
+    /** 滚动完成后播放角标锁定动画 */
+    waitForScrollEnd(el, function() {
+      updatePosition();
+      cornerWrap.style.animation = '__pilot-corner-in 0.4s ease-out forwards';
+    });
+
+    /** 角标动画结束后开始倒计时淡出 */
+    setTimeout(function() {
+      overlay.style.opacity = '0';
+      cornerWrap.style.opacity = '0';
+      cornerWrap.style.transition = 'opacity 0.3s ease';
+      setTimeout(function() {
+        resizeObserver.disconnect();
+        window.removeEventListener('scroll', updatePosition, true);
+        overlay.remove();
+        cornerWrap.remove();
+      }, 300);
+    }, 1800);
+  }
+
   /** 按索引获取元素并滚动到视口居中（所有 idx 操作函数的统一入口）
    *  返回 { el, idx } 或错误字符串，操作函数只需检查返回值即可 */
   function operateByIndex(i) {
@@ -277,6 +398,7 @@ export const snapshotCode = `
     if (!el) return { error: 'Element ' + i + ' not found' };
     if (!el.isConnected) return { error: 'Element ' + i + ' disconnected from DOM' };
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightElement(el);
     return { el: el, idx: i };
   }
 
@@ -288,6 +410,7 @@ export const snapshotCode = `
     var t = result.target;
     if (t.el.disabled) return { error: 'Element ' + t.idx + ' "' + t.label + '" is disabled' };
     t.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightElement(t.el);
     return { el: t.el, idx: t.idx, label: t.label };
   }
 
@@ -567,6 +690,7 @@ export const snapshotCode = `
     var matchHint = matches.length > 1 ? ' (' + matches.length + ' matches, nth=' + n + ')' : '';
     var idx = el.getAttribute('data-pilot-idx');
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightElement(el);
     el.focus();
     el.value = value;
     if (isChangeInputType(el)) {
@@ -609,6 +733,7 @@ export const snapshotCode = `
     var el = matches[n];
     var matchHint = matches.length > 1 ? ' (' + matches.length + ' matches, nth=' + n + ')' : '';
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightElement(el);
     /** 重新遍历 options 设置 value（findAll 返回后 DOM 可能因 snapshot 刷新而变化） */
     for (var oi = 0; oi < el.options.length; oi++) {
       if (el.options[oi].text.toLowerCase().indexOf(tLower) !== -1) {

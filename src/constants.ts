@@ -56,6 +56,8 @@ export const DEFAULT_OPTIONS = {
   maxResultSize: 100 * 1024,
   /** Alt+Click 元素检查器，默认开启 */
   inspector: true,
+  /** 操作元素时显示高亮聚焦效果，默认开启 */
+  highlight: true,
   /** 语言环境，默认中文 */
   locale: 'zh',
   /** 是否检查 npm 新版本，默认开启 */

@@ -105,6 +105,7 @@ export function buildInjectScript(options: ResolvedPilotOptions, pilotVersion?: 
 
   return `<script>
 var __PILOT_VERSION__ = "${version}";
+var __PILOT_HIGHLIGHT__ = ${options.highlight};
 /** 实例 ID 持久化到 sessionStorage，同一 tab 刷新后复用（不同 tab 天然隔离） */
 var __pilot_instanceId = sessionStorage.getItem('__pilot_instanceId') || Math.random().toString(16).slice(2, 10);
 sessionStorage.setItem('__pilot_instanceId', __pilot_instanceId);
