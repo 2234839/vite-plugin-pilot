@@ -27,9 +27,7 @@
     "dev": "vite build && chmod +x dist/bin/pilot.js && npx vite --config playground/vite.config.ts --host --port 5173 --strictPort",
     "build:demo": "npx tsx playground/demo/build.ts"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@vue/compiler-dom": ">=3.3",
     "magic-string": ">=0.30",

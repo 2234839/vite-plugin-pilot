@@ -77,7 +77,12 @@ Push prompts directly from the browser to your running Claude Code session — n
 
 > **Prerequisites**: Claude Code v2.1.80+, claude.ai login (API Key / Console auth not supported). Channels are in Research Preview — use `--dangerously-load-development-channels` flag. **Note: This feature has not been tested by the author (account lacks Channel API access). Feedback welcome.**
 
-1. Add `.mcp.json` to your project root:
+1. Install the required dependency (`pilot-channel.js` depends on `@modelcontextprotocol/sdk`, which is not bundled to keep package size small):
+```bash
+npm install @modelcontextprotocol/sdk
+```
+
+2. Add `.mcp.json` to your project root:
 ```json
 {
   "mcpServers": {
@@ -89,7 +94,7 @@ Push prompts directly from the browser to your running Claude Code session — n
 }
 ```
 
-2. Add hook config to `.claude/settings.local.json` (fallback mode, always works):
+3. Add hook config to `.claude/settings.local.json` (fallback mode, always works):
 ```json
 {
   "hooks": {
@@ -107,7 +112,7 @@ Push prompts directly from the browser to your running Claude Code session — n
 }
 ```
 
-3. Start Claude Code with the channel loaded:
+4. Start Claude Code with the channel loaded:
 ```bash
 claude --dangerously-load-development-channels server:pilot-channel
 ```

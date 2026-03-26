@@ -137,7 +137,11 @@ npx pilot help                    # 查看辅助函数列表
 - **降级模式**（始终可用）：浏览器 Alt+Click → HTTP POST → pilot-channel → `.pilot/channel-pending.txt` → UserPromptSubmit hook → Claude Code 自动附加
 
 **首次配置**（skill 自动执行）：
-1. 确认项目根目录存在 `.mcp.json`，内容如下（不存在则创建）：
+1. 安装 Channel Server 所需依赖（`pilot-channel.js` 依赖 `@modelcontextprotocol/sdk`，为避免影响包体积，该依赖未内置）：
+```bash
+pnpm add @modelcontextprotocol/sdk
+```
+2. 确认项目根目录存在 `.mcp.json`，内容如下（不存在则创建）：
 ```json
 {
   "mcpServers": {
@@ -148,7 +152,7 @@ npx pilot help                    # 查看辅助函数列表
   }
 }
 ```
-2. 确认 `.claude/settings.local.json` 存在并包含 hook 配置（不存在则创建，已有 hooks 时合并）：
+3. 确认 `.claude/settings.local.json` 存在并包含 hook 配置（不存在则创建，已有 hooks 时合并）：
 ```json
 {
   "hooks": {

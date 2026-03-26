@@ -62,7 +62,12 @@
 
 > **前置条件**：Claude Code v2.1.80+、claude.ai 登录。Channel 功能处于 Research Preview。**注意：此功能未经作者实际验证，欢迎反馈。**
 
-1. 在项目根目录创建或更新 `.mcp.json`：
+1. 安装 Channel Server 所需的依赖（`pilot-channel.js` 依赖 `@modelcontextprotocol/sdk`，为避免影响包体积，该依赖未内置）：
+```bash
+pnpm add @modelcontextprotocol/sdk
+```
+
+2. 在项目根目录创建或更新 `.mcp.json`：
 ```json
 {
   "mcpServers": {
@@ -74,7 +79,7 @@
 }
 ```
 
-2. 在 `.claude/settings.local.json` 中添加 hook 配置（降级模式，如已有 hooks 则合并，不要覆盖）：
+3. 在 `.claude/settings.local.json` 中添加 hook 配置（降级模式，如已有 hooks 则合并，不要覆盖）：
 ```json
 {
   "hooks": {
