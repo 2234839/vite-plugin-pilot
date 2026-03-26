@@ -130,7 +130,11 @@ npx pilot help                    # 查看辅助函数列表
 
 浏览器中 Alt+Click 的提示词可直接发送到当前 Claude Code session。
 
-**架构**：浏览器 Alt+Click → HTTP POST → pilot-channel → `.pilot/channel-pending.txt` → UserPromptSubmit hook → Claude Code 自动附加到用户下次输入
+> **前置条件**：Claude Code v2.1.80+、claude.ai 登录。Channel 功能处于 Research Preview，需 `--dangerously-load-development-channels server:pilot-channel` 启动。**注意：此功能未经作者实际验证，欢迎反馈。**
+
+**架构**：
+- **Channel 模式**：浏览器 Alt+Click → HTTP POST → pilot-channel (MCP Channel Server) → stdio → Claude Code session
+- **降级模式**（始终可用）：浏览器 Alt+Click → HTTP POST → pilot-channel → `.pilot/channel-pending.txt` → UserPromptSubmit hook → Claude Code 自动附加
 
 **首次配置**（skill 自动执行）：
 1. 确认项目根目录存在 `.mcp.json`，内容如下（不存在则创建）：
@@ -144,7 +148,7 @@ npx pilot help                    # 查看辅助函数列表
   }
 }
 ```
-2. 确认 `.claude/settings.local.json` 存在并包含 hook 配置（不存在则创建）：
+2. 确认 `.claude/settings.local.json` 存在并包含 hook 配置（不存在则创建，已有 hooks 时合并）：
 ```json
 {
   "hooks": {
@@ -162,4 +166,4 @@ npx pilot help                    # 查看辅助函数列表
 }
 ```
 
-浏览器端「发送给 Claude」按钮会在 pilot-channel server 运行时自动可用（dev server 启动时自动通过 `.mcp.json` 启动）。发送后，用户在 Claude Code 中输入任意内容时，消息会自动附加。
+浏览器端「发送给 Claude」按钮会在 pilot-channel server 运行时自动可用（Claude Code 启动时通过 `.mcp.json` 自动拉起）。未连接时按钮自动禁用，「复制提示词」始终可用。

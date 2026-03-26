@@ -10,7 +10,7 @@
 
 检查 Vite 配置是否已包含插件：
 - 检查 `vite.config.ts`（或 `vite.config.js`）的 `plugins` 数组是否包含 `pilot()`
-- 如果没有，在文件顶部添加 `import pilot from 'vite-plugin-pilot'`，并在 plugins 数组中添加 `pilot()`
+- 如果没有，在文件顶部添加 `import { pilot } from 'vite-plugin-pilot'`，并在 plugins 数组中添加 `pilot()`
 - 如果已有 `pilot({...})` 配置，不要覆盖已有字段
 
 ## 步骤 2：配置插件选项
@@ -53,3 +53,43 @@
 4. 执行 `npx pilot page` 确认能看到页面快照
 
 全部完成后告诉用户：配置完成，现在可以通过 `/pilot` 或 `npx pilot` 命令测试浏览器页面了。
+
+## 步骤 6（可选）：配置浏览器直连 Claude Code
+
+**跳过条件**：如果用户未使用 Claude Code，或不需要浏览器 Alt+Click 直接推送消息给 agent，跳过此步骤。
+
+此功能让用户在浏览器中 Alt+Click 元素后，可直接将提示词推送到 Claude Code session，无需手动复制粘贴。
+
+> **前置条件**：Claude Code v2.1.80+、claude.ai 登录。Channel 功能处于 Research Preview。**注意：此功能未经作者实际验证，欢迎反馈。**
+
+1. 在项目根目录创建或更新 `.mcp.json`：
+```json
+{
+  "mcpServers": {
+    "pilot-channel": {
+      "command": "node",
+      "args": ["node_modules/vite-plugin-pilot/bin/pilot-channel.js"]
+    }
+  }
+}
+```
+
+2. 在 `.claude/settings.local.json` 中添加 hook 配置（降级模式，如已有 hooks 则合并，不要覆盖）：
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node node_modules/vite-plugin-pilot/bin/pilot-hook-channel.js"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+配置后启动 Claude Code 时加 `--dangerously-load-development-channels server:pilot-channel`。浏览器 Alt+Click 面板中的「发送给 Claude」按钮会自动检测 channel server 是否运行，未连接时自动禁用。

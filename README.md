@@ -75,6 +75,8 @@ DevTools MCP connects via Chrome's debugging protocol — the official backdoor.
 
 Push prompts directly from the browser to your running Claude Code session — no copy-paste needed.
 
+> **Prerequisites**: Claude Code v2.1.80+, claude.ai login (API Key / Console auth not supported). Channels are in Research Preview — use `--dangerously-load-development-channels` flag. **Note: This feature has not been tested by the author (account lacks Channel API access). Feedback welcome.**
+
 1. Add `.mcp.json` to your project root:
 ```json
 {
@@ -87,7 +89,7 @@ Push prompts directly from the browser to your running Claude Code session — n
 }
 ```
 
-2. Add hook config to `.claude/settings.local.json`:
+2. Add hook config to `.claude/settings.local.json` (fallback mode, always works):
 ```json
 {
   "hooks": {
@@ -105,7 +107,16 @@ Push prompts directly from the browser to your running Claude Code session — n
 }
 ```
 
-The "Send to Claude" button in the Alt+Click panel auto-detects whether the channel server is running. When you send a message, it will be automatically attached to your next Claude Code input.
+3. Start Claude Code with the channel loaded:
+```bash
+claude --dangerously-load-development-channels server:pilot-channel
+```
+
+**How it works**:
+- **Channel mode** (recommended): pilot-channel pushes directly to Claude Code session via MCP stdio
+- **Fallback mode** (always available): message written to `.pilot/channel-pending.txt`, auto-attached via UserPromptSubmit hook
+
+The "Send to Claude" button in the Alt+Click panel auto-detects whether the channel server is running. When unavailable, the button is disabled — "Copy Prompt" always works.
 
 ## How It Works
 
