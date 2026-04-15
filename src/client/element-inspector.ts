@@ -158,9 +158,16 @@ export const elementInspectorCode = `
   }
 
   function onAltKeyDown(e) {
-    if (e.altKey && !active) {
+    /** 仅单独按下 Alt 键时激活选择模式，组合键（Ctrl+Alt、Alt+Shift 等）不触发 */
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && !active) {
       active = true;
       document.body.style.cursor = 'crosshair';
+    }
+    /** Alt 已激活时，出现其他修饰键立即取消（防止 Ctrl+Alt 组合仍高亮） */
+    if (active && (e.ctrlKey || e.shiftKey || e.metaKey) && !panelOpen) {
+      active = false;
+      hideHighlight();
+      document.body.style.cursor = '';
     }
   }
 
@@ -175,6 +182,8 @@ export const elementInspectorCode = `
 
   function onMouseMove(e) {
     if (!active) return;
+    /** 出现其他修饰键时不高亮（防御性检查） */
+    if (e.ctrlKey || e.shiftKey || e.metaKey) return;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     if (el && el !== document.body && el !== document.documentElement) {
       showHighlight(el);
@@ -183,6 +192,8 @@ export const elementInspectorCode = `
 
   function onClick(e) {
     if (!active || !currentTarget) return;
+    /** 组合键（Ctrl+Click、Shift+Click 等）不触发选择面板 */
+    if (e.ctrlKey || e.shiftKey || e.metaKey) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -329,22 +340,59 @@ export const elementInspectorCode = `
       });
     };
 
-    /** 复制按钮 */
+    /** 使用 execCommand fallback 复制文本（兼容非 Secure Context） */
+    function fallbackCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    }
+
+    /** 复制按钮（三级降级：clipboard API → execCommand → 提示手动复制） */
     document.getElementById('__pilot-prompt-copy').onclick = function() {
       var text = getPromptText();
-      navigator.clipboard.writeText(text).then(function() {
-        var btn = document.getElementById('__pilot-prompt-copy');
+      var btn = document.getElementById('__pilot-prompt-copy');
+      var originalText = btn.textContent;
+
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function() {
+          btn.textContent = '__LOCALE_COPIED__';
+          btn.style.background = '#22c55e';
+          startAutoClose();
+          setTimeout(function() { btn.textContent = originalText; btn.style.background = '#3b82f6'; }, 1500);
+        }).catch(function() {
+          if (fallbackCopy(text)) {
+            btn.textContent = '__LOCALE_COPIED__';
+            btn.style.background = '#22c55e';
+            startAutoClose();
+            setTimeout(function() { btn.textContent = originalText; btn.style.background = '#3b82f6'; }, 1500);
+          } else {
+            showManualCopyHint(text);
+          }
+        });
+      } else if (fallbackCopy(text)) {
         btn.textContent = '__LOCALE_COPIED__';
         btn.style.background = '#22c55e';
         startAutoClose();
-        setTimeout(function() { btn.textContent = '__LOCALE_COPY_PROMPT__'; btn.style.background = '#3b82f6'; }, 1500);
-      }).catch(function() {
-        /** fallback: 选中 textarea 内容 */
-        var fullPrompt = getPromptText();
-        textarea.value = fullPrompt;
-        textarea.select();
-      });
+        setTimeout(function() { btn.textContent = originalText; btn.style.background = '#3b82f6'; }, 1500);
+      } else {
+        showManualCopyHint(text);
+      }
     };
+
+    /** 显示手动复制提示（将提示词填入 textarea 并选中） */
+    function showManualCopyHint(text) {
+      textarea.value = text;
+      textarea.select();
+      var btn = document.getElementById('__pilot-prompt-copy');
+      btn.textContent = '__LOCALE_COPY_MANUAL__';
+      btn.style.background = '#f59e0b';
+      setTimeout(function() { btn.textContent = '__LOCALE_COPY_PROMPT__'; btn.style.background = '#3b82f6'; }, 2000);
+    }
 
     /** 关闭面板时清理高亮 */
     function closePanel() {

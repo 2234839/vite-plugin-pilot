@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 export default function App() {
   const logInfo = () => console.log('这是一条 info 日志', { timestamp: Date.now(), foo: 'bar' })
   const logWarn = () => console.warn('这是一条 warning 日志', 'deprecated API usage')
@@ -39,6 +41,8 @@ export default function App() {
           ))}
         </ul>
       </section>
+
+      <FormSection />
     </div>
   )
 }
@@ -52,5 +56,36 @@ function UserCard({ name, role }: { name: string; role: string }) {
         <div className="role">{role}</div>
       </div>
     </div>
+  )
+}
+
+/** React 响应式表单测试区域 */
+function FormSection() {
+  const [name, setName] = useState('')
+  const [role, setRole] = useState('dev')
+  const [agreed, setAgreed] = useState(false)
+
+  return (
+    <section className="card">
+      <h2>表单（useState）</h2>
+      <div className="form-row">
+        <label>姓名</label>
+        <input placeholder="请输入姓名" value={name} onChange={e => setName(e.target.value)} />
+        {name && <span className="form-preview">姓名: {name}</span>}
+      </div>
+      <div className="form-row">
+        <label>角色</label>
+        <select value={role} onChange={e => setRole(e.target.value)}>
+          <option value="dev">开发者</option>
+          <option value="designer">设计师</option>
+          <option value="pm">产品经理</option>
+        </select>
+        {role && <span className="form-preview">角色: {role}</span>}
+      </div>
+      <div className="form-row">
+        <label><input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} /> 同意条款</label>
+        {agreed && <span className="form-preview">已同意</span>}
+      </div>
+    </section>
   )
 }

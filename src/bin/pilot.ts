@@ -240,24 +240,47 @@ function writePendingJs(pilotDir: string, instanceId: string, code: string) {
 /**
  * 解析命令行参数
  */
+/** 已知的 command 关键字（command 和 flag 有交集：page/logs，需要优先匹配 command） */
+const KNOWN_COMMANDS = new Set(['run', 'page', 'logs', 'status', 'help', 'bridge', 'userscript', 'server'])
+
+/**
+ * 智能参数解析：从任意顺序的参数中提取 instance，优先匹配 command，
+ * 其余已知 flag 关键字设为 flag，未知 token 作为 positional
+ *
+ * 支持的各种写法：
+ *   pilot run 'code' nopage instance:xxx
+ *   pilot instance:xxx run 'code' nopage
+ *   pilot page instance:xxx
+ *   pilot page cached
+ */
 function parseArgs(args: string[]) {
-  const command = args[0] || 'help'
-  const rest = args.slice(1)
   const flags = { page: false, logs: false, fresh: false, cached: false, nopage: false, nologs: false, instance: '' as string }
   const positional: string[] = []
+  let command = ''
 
-  for (const arg of rest) {
-    if (arg === 'page') flags.page = true
-    else if (arg === 'logs') flags.logs = true
-    else if (arg === 'nopage') flags.nopage = true
-    else if (arg === 'nologs') flags.nologs = true
-    else if (arg === 'fresh') flags.fresh = true
-    else if (arg === 'cached') flags.cached = true
-    else if (arg.startsWith('instance:')) flags.instance = arg.slice(9)
-    else positional.push(arg)
+  for (const arg of args) {
+    if (arg.startsWith('instance:')) {
+      flags.instance = arg.slice(9)
+    } else if (!command && KNOWN_COMMANDS.has(arg)) {
+      /** 第一个已知 command 关键字设为 command（page/logs 既是 command 也是 flag） */
+      command = arg
+    } else if (command === 'run' && (arg === 'page' || arg === 'nopage' || arg === 'nologs')) {
+      /** run 命令的附属 flag */
+      if (arg === 'page') flags.page = true
+      else if (arg === 'nopage') flags.nopage = true
+      else if (arg === 'nologs') flags.nologs = true
+    } else if (command === 'page' && arg === 'cached') {
+      flags.cached = true
+    } else if (command === 'page' && arg === 'fresh') {
+      flags.fresh = true
+    } else if (command === 'logs' && arg === 'fresh') {
+      flags.fresh = true
+    } else {
+      positional.push(arg)
+    }
   }
 
-  return { command, flags, positional }
+  return { command: command || 'help', flags, positional }
 }
 
 /**
@@ -748,7 +771,7 @@ async function main() {
   __pilot_uncheckByText(text, nth?)     取消勾选
   __pilot_keydownByText(text, key)      在元素上触发按键
 
-compact snapshot 格式: tag#idx[val=V][check=N][type=T][ph=P][disabled] text`)
+compact snapshot 格式: tag#idx[val=V][check=选中项][type=T][ph=P][href:路径][disabled] text`)
       break
   }
 }

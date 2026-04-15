@@ -156,6 +156,21 @@ export const snapshotCode = `
         }
       }
 
+      /** a 标签采集 href，帮助 AI 理解链接目标（仅保留 pathname+hash，忽略 origin 和 query） */
+      if (tagLower === 'a' && el.href) {
+        try {
+          var hrefUrl = new URL(el.href);
+          /** 外部链接（不同 origin）添加 external 标记 */
+          if (hrefUrl.origin !== location.origin) {
+            entry.href = hrefUrl.host + hrefUrl.pathname + hrefUrl.hash;
+          } else {
+            entry.href = hrefUrl.pathname + hrefUrl.hash;
+          }
+        } catch(e) {
+          entry.href = el.getAttribute('href') || '';
+        }
+      }
+
       if (tagLower === 'input' || tagLower === 'textarea' || tagLower === 'select') {
         if (el.type === 'checkbox' || el.type === 'radio') {
           if (el.checked) entry.checked = true;
@@ -538,7 +553,8 @@ export const snapshotCode = `
       var el = window.__pilot_elements[k];
       var tag = el.tagName;
       var tagLower = tag.toLowerCase();
-      var label = (el.textContent || '').trim().slice(0, 50);
+      /** 使用 getElementLabel 获取文本（li 跳过 button/a 子元素，避免匹配污染） */
+      var label = getElementLabel(el);
       var via = '';
       var score = 0;
       /** SELECT 标签优先匹配 option 文本（textContent 是所有 option 拼接，匹配不准确） */
@@ -601,9 +617,29 @@ export const snapshotCode = `
    *  用法: __pilot_clickByText("添加") — 点击文本为"添加"的按钮
    *  用法: __pilot_clickByText("重置", 1) — 点击第 2 个匹配（0-indexed）
    */
-  /** 获取元素的文本标签（含父 LABEL 回退） */
+  /** 获取元素的文本标签（含父 LABEL 回退）
+   *  li 元素跳过 button/a 子元素文本（避免 "任务名x" 中的删除按钮文本污染匹配） */
   function getElementLabel(el) {
-    var label = (el.textContent || '').trim().slice(0, 50);
+    var label = '';
+    if (el.tagName === 'LI') {
+      /** 复用 snapshot 采集时的 SKIP_TEXT_TAGS 逻辑，只取非交互子元素文本 */
+      var SKIP_TEXT_TAGS = { BUTTON: 1, A: 1 };
+      var liTexts = [];
+      (function collect(node) {
+        for (var ci = 0; ci < node.childNodes.length; ci++) {
+          var child = node.childNodes[ci];
+          if (child.nodeType === 3) {
+            var t = child.textContent;
+            if (t && t.trim()) liTexts.push(t.trim());
+          } else if (child.nodeType === 1 && !SKIP_TEXT_TAGS[child.tagName]) {
+            collect(child);
+          }
+        }
+      })(el);
+      label = liTexts.join(' ').slice(0, 50);
+    } else {
+      label = (el.textContent || '').trim().slice(0, 50);
+    }
     if (!label && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') && el.parentElement && el.parentElement.tagName === 'LABEL') {
       label = (el.parentElement.textContent || '').trim().slice(0, 50);
     }

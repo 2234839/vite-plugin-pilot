@@ -39,6 +39,7 @@ export function buildBridgeScript(options: ResolvedPilotOptions, pilotVersion: s
         .replace(/__LOCALE_CLOSE__/g, '')
         .replace(/__LOCALE_CLOSE_IN__/g, '')
         .replace(/__LOCALE_COPIED__/g, '')
+        .replace(/__LOCALE_COPY_MANUAL__/g, '')
         .replace(/__LOCALE_SENDING__/g, '')
         .replace(/__LOCALE_SENT__/g, '')
         .replace(/__LOCALE_SEND_FAILED__/g, '')

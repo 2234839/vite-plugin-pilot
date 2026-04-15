@@ -93,6 +93,8 @@ export function filterCompact(data: Record<string, unknown>): Record<string, unk
   const NO_IDX_TAGS = new Set(['h2', 'h3', 'div', 'span', 'li', 'ul', 'ol'])
   /** compact 模式不需要的 input type（AI 通过 placeholder/label 交互，不依赖 type） */
   const SKIP_TYPES = new Set(['text', 'password', 'number'])
+  /** compact 模式不需要显示 value 的 input type（颜色值十六进制对 AI 无意义） */
+  const SKIP_VALUE_TYPES = new Set(['color'])
   const deduped = merged.map((e: Record<string, unknown>, idx: number) => {
     const { floating, line, ...rest } = e
     /** compact 模式只为带 src 的子组件保留 line（App.vue 元素的 line 在 full snapshot 中可用） */
@@ -106,6 +108,11 @@ export function filterCompact(data: Record<string, unknown>): Record<string, unk
     if (SKIP_TYPES.has(rest.type as string)) {
       const { type: _, ...noType } = rest
       return noType
+    }
+    /** 移除颜色值的 value（十六进制对 AI 无意义），节省 ~10 bytes/条 */
+    if (SKIP_VALUE_TYPES.has(rest.type as string)) {
+      const { value: _, ...noValue } = rest
+      return noValue
     }
     if (rest.tag === 'span' && rest.text && idx > 0) {
       const prev = merged[idx - 1]
@@ -319,7 +326,9 @@ export function filterCompact(data: Record<string, unknown>): Record<string, unk
       if (group.length > 1) {
         const checkedIdx = group.findIndex((g: Record<string, unknown>) => g.checked)
         const labels = group.map((g: Record<string, unknown>) => g.label as string)
-        radioMerged.push({ tag: 'radio', text: labels, checked: checkedIdx })
+        /** checked 存选中项文本（而非索引），与 select 格式一致，agent 一步可知当前选中项 */
+        const checkedLabel = checkedIdx >= 0 ? (labels[checkedIdx] as string) : undefined
+        radioMerged.push({ tag: 'radio', text: labels, checked: checkedLabel })
         ri = ni
         continue
       }
@@ -454,12 +463,12 @@ export function serializeCompactText(els: Record<string, unknown>[]): string {
     /** 有 id 的非交互元素（如 span#count）输出 id，帮助 AI 理解语义 */
     if (e.id != null && !INTERACTIVE_TAGS.has(e.tag as string)) parts.push(`#${e.id}`)
     if (e.value != null) {
-      /** select 值与 options 重复时，用 check=N（索引）替代 val=X（文本），与 radio 格式一致 */
+      /** select 值与 options 重复时，用 check=选中项（文本）替代 val=X，agent 一步可知当前选中项 */
       const opts = Array.isArray(e.options) ? e.options as string[] : null
       if (opts) {
         const idx = opts.indexOf(String(e.value))
         if (idx >= 0) {
-          parts.push(`check=${idx}`)
+          parts.push(`check=${e.value}`)
         } else {
           parts.push(`val=${e.value}`)
         }
@@ -473,6 +482,8 @@ export function serializeCompactText(els: Record<string, unknown>[]): string {
       parts.push(`${e.min}-${e.max}`)
     }
     if (e.placeholder != null) parts.push(`ph:${e.placeholder}`)
+    /** a 标签显示 href 路径，帮助 AI 理解链接目标 */
+    if (e.href != null) parts.push(`href:${e.href as string}`)
     if (e.count != null) parts.push(`x${e.count}`)
     if (e.disabled) parts.push('disabled')
     if (e.checked != null) {
@@ -484,6 +495,9 @@ export function serializeCompactText(els: Record<string, unknown>[]): string {
         if (e.checked >= 0) {
           parts.push(`check=${e.checked}`)
         }
+      } else if (typeof e.checked === 'string') {
+        /** radio 选中项文本（如 check=跟随系统） */
+        parts.push(`check=${e.checked}`)
       } else {
         parts.push('check')
       }

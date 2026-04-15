@@ -16,6 +16,7 @@ const LOCALES = {
     close: '关闭',
     closeIn: 's 后关闭',
     copied: '已复制!',
+    copyManual: '请手动 Ctrl+C 复制',
     sending: '发送中...',
     sent: '已发送!',
     sendFailed: '发送失败',
@@ -39,6 +40,7 @@ const LOCALES = {
     close: 'Close',
     closeIn: 's to close',
     copied: 'Copied!',
+    copyManual: 'Ctrl+C to copy',
     sending: 'Sending...',
     sent: 'Sent!',
     sendFailed: 'Failed',
@@ -87,6 +89,7 @@ export function buildInjectScript(options: ResolvedPilotOptions, pilotVersion?: 
         .replace(/__LOCALE_CLOSE__/g, locale.close)
         .replace(/__LOCALE_CLOSE_IN__/g, locale.closeIn)
         .replace(/__LOCALE_COPIED__/g, locale.copied)
+        .replace(/__LOCALE_COPY_MANUAL__/g, locale.copyManual)
         .replace(/__LOCALE_SENDING__/g, locale.sending)
         .replace(/__LOCALE_SENT__/g, locale.sent)
         .replace(/__LOCALE_SEND_FAILED__/g, locale.sendFailed)
