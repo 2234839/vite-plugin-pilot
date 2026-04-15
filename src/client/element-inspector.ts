@@ -39,7 +39,17 @@ export const elementInspectorCode = `
     while (current) {
       if (current.__vueParentComponent) return current.__vueParentComponent;
       if (current._vnode && current._vnode.component) return current._vnode.component;
-      current = current.parentElement;
+      if (current.parentElement) {
+        current = current.parentElement;
+      } else {
+        /** 穿越 shadow boundary：跳到 shadow host 继续查找 */
+        var root = current.getRootNode();
+        if (root && root.host) {
+          current = root.host;
+        } else {
+          break;
+        }
+      }
     }
     return null;
   }
@@ -68,13 +78,24 @@ export const elementInspectorCode = `
     var parts = [];
     var current = el;
     while (current && current !== document.body && current !== document.documentElement) {
-      var tag = current.tagName.toLowerCase();
+      var tag = current.tagName ? current.tagName.toLowerCase() : '';
       var id = current.id ? '#' + current.id : '';
       var cls = current.className && typeof current.className === 'string'
         ? '.' + current.className.trim().split(/\\s+/).slice(0, 2).join('.')
         : '';
       parts.unshift(tag + id + cls);
-      current = current.parentElement;
+      if (current.parentElement) {
+        current = current.parentElement;
+      } else {
+        /** 穿越 shadow boundary：插入标记并跳到 shadow host */
+        var root = current.getRootNode();
+        if (root && root.host) {
+          parts.unshift('shadow-root');
+          current = root.host;
+        } else {
+          break;
+        }
+      }
     }
     return parts.join(' > ');
   }

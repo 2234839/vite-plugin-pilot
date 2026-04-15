@@ -17,16 +17,80 @@ export const snapshotCode = `
   /** 记录本次 exec 中操作过的元素文本标签（用于匹配 compact 中被合并的 checkbox/radio） */
   window.__pilot_operatedLabels = [];
 
-  /** 判断元素是否为叶子节点（无可见子元素） */
   var INVISIBLE_TAGS = { SCRIPT:1, STYLE:1, OPTION:1, OPTGROUP:1 };
   var ALWAYS_NONLEAF = { SELECT:1, TEXTAREA:1, TABLE:1, UL:1, OL:1 };
+
+  /** 页面是否存在 shadow DOM（首次检测后缓存为 false，检测到后永久为 true，支持动态加载的 web component） */
+  var _hasShadowDOM = false;
+
+  /** 递归收集所有元素，穿透 shadow DOM boundary（仅 open mode，closed 的 shadowRoot 为 null 自动跳过） */
+  function collectAllElements(root) {
+    var elements = [];
+    var all = root.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      elements.push(all[i]);
+      if (all[i].shadowRoot) {
+        var shadowEls = collectAllElements(all[i].shadowRoot);
+        for (var j = 0; j < shadowEls.length; j++) elements.push(shadowEls[j]);
+      }
+    }
+    return elements;
+  }
+
+  /** 智能元素收集：无 shadow DOM 时直接用原生 querySelectorAll，有 shadow DOM 时递归穿透 */
+  function collectElements(root) {
+    if (!_hasShadowDOM) {
+      var all = root.querySelectorAll('*');
+      for (var i = 0; i < all.length; i++) {
+        if (all[i].shadowRoot) { _hasShadowDOM = true; break; }
+      }
+      if (!_hasShadowDOM) return all;
+    }
+    return collectAllElements(root);
+  }
+
+  /** 判断元素是否为叶子节点（无可见子元素） */
   function isLeaf(el) {
     if (ALWAYS_NONLEAF[el.tagName]) return false;
+    if (el.shadowRoot) return false;
     for (var i = 0; i < el.children.length; i++) {
       var child = el.children[i];
       if (!INVISIBLE_TAGS[child.tagName] && child.offsetParent !== null) return false;
     }
     return true;
+  }
+
+  /** 查找父级 LABEL：先在当前 DOM 层查找，再穿越 shadow boundary 到 host 层 */
+  function findParentLabel(el) {
+    var current = el.parentElement;
+    while (current) {
+      if (current.tagName === 'LABEL') return current;
+      current = current.parentElement;
+    }
+    var root = el.getRootNode();
+    if (root && root.host) {
+      current = root.host.parentElement;
+      while (current) {
+        if (current.tagName === 'LABEL') return current;
+        current = current.parentElement;
+      }
+    }
+    return null;
+  }
+
+  /** 创建增强版 MutationObserver，同时观察 document.body 和所有已知 shadow root（无 shadow DOM 时退化为原生行为） */
+  function createEnhancedObserver(callback, options) {
+    var observer = new MutationObserver(callback);
+    observer.observe(document.body, options);
+    if (_hasShadowDOM) {
+      var allEls = collectAllElements(document.body);
+      for (var i = 0; i < allEls.length; i++) {
+        if (allEls[i].shadowRoot) {
+          try { observer.observe(allEls[i].shadowRoot, options); } catch(e) {}
+        }
+      }
+    }
+    return observer;
   }
 
   window.__pilot_snapshot = function() {
@@ -45,7 +109,7 @@ export const snapshotCode = `
       }
     }
 
-    var allElements = document.body.querySelectorAll('*');
+    var allElements = collectElements(document.body);
     /** 记录当前 DOM 元素总数，供 findByText 轻量检查是否需要刷新 */
     window.__pilot_lastElementCount = allElements.length;
 
@@ -176,8 +240,9 @@ export const snapshotCode = `
           if (el.checked) entry.checked = true;
           entry.type = el.type;
           /** 从父元素 <label> 提取文本作为标签 */
-          if (el.parentElement && el.parentElement.tagName === 'LABEL') {
-            var labelText = el.parentElement.textContent.trim().slice(0, 40);
+          var parentLabel = findParentLabel(el);
+          if (parentLabel) {
+            var labelText = parentLabel.textContent.trim().slice(0, 40);
             if (labelText) entry.label = labelText;
           }
         } else if (tagLower === 'select') {
@@ -578,11 +643,14 @@ export const snapshotCode = `
         score = label.toLowerCase() === tLower ? 100 : label.toLowerCase().indexOf(tLower) === 0 ? 80 : 50;
       }
       /** input/select/textarea 搜索父元素 <label> 的文本 */
-      if (!via && (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') && el.parentElement && el.parentElement.tagName === 'LABEL') {
-        var parentText = (el.parentElement.textContent || '').trim().slice(0, 50);
-        if (parentText.toLowerCase().indexOf(tLower) !== -1) {
-          via = 'label'; label = parentText;
-          score = parentText.toLowerCase() === tLower ? 100 : parentText.toLowerCase().indexOf(tLower) === 0 ? 80 : 50;
+      if (!via && (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA')) {
+        var parentLabel = findParentLabel(el);
+        if (parentLabel) {
+          var parentText = (parentLabel.textContent || '').trim().slice(0, 50);
+          if (parentText.toLowerCase().indexOf(tLower) !== -1) {
+            via = 'label'; label = parentText;
+            score = parentText.toLowerCase() === tLower ? 100 : parentText.toLowerCase().indexOf(tLower) === 0 ? 80 : 50;
+          }
         }
       }
       if (via) {
@@ -601,7 +669,7 @@ export const snapshotCode = `
     var results = searchByText(tLower);
     if (results.length === 0 && window.__pilot_snapshot) {
       /** 轻量检查：DOM 元素数量未变化时跳过完整 snapshot（避免不存在的文本触发 ~100ms 开销） */
-      var currentCount = document.body.querySelectorAll('*').length;
+      var currentCount = collectElements(document.body).length;
       if (currentCount !== window.__pilot_lastElementCount) {
         window.__pilot_lastElementCount = currentCount;
         window.__pilot_snapshot();
@@ -640,8 +708,9 @@ export const snapshotCode = `
     } else {
       label = (el.textContent || '').trim().slice(0, 50);
     }
-    if (!label && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') && el.parentElement && el.parentElement.tagName === 'LABEL') {
-      label = (el.parentElement.textContent || '').trim().slice(0, 50);
+    if (!label && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA')) {
+      var parentLabel = findParentLabel(el);
+      if (parentLabel) label = (parentLabel.textContent || '').trim().slice(0, 50);
     }
     return label;
   }
@@ -888,14 +957,13 @@ export const snapshotCode = `
       }
 
       /** 用 MutationObserver 监听 DOM 变化，变化后立即轻量搜索（无需完整 snapshot） */
-      var observer = new MutationObserver(function() {
+      var observer = createEnhancedObserver(function() {
         if (disappear ? !searchExisting() : searchExisting()) {
           observer.disconnect();
           clearTimeout(fallbackTimer);
           resolve(disappear ? 'Disappeared: "' + text + '"' : 'Found: "' + text + '"');
         }
-      });
-      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      }, { childList: true, subtree: true, characterData: true });
 
       /** fallback：MutationObserver 可能遗漏（React 不走 DOM mutation），200ms 轮询兜底 */
       var fallbackTimer = setInterval(function() {
@@ -937,14 +1005,13 @@ export const snapshotCode = `
       if (checkEnabled()) { resolve('Enabled: "' + text + '"'); return; }
 
       /** MutationObserver 监听属性变化（disabled 移除），立即检查 */
-      var observer = new MutationObserver(function() {
+      var observer = createEnhancedObserver(function() {
         if (checkEnabled()) {
           observer.disconnect();
           clearTimeout(fallbackTimer);
           resolve('Enabled: "' + text + '"');
         }
-      });
-      observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['disabled'] });
+      }, { attributes: true, subtree: true, attributeFilter: ['disabled'] });
 
       /** fallback：200ms 轮询兜底 */
       var fallbackTimer = setInterval(function() {
