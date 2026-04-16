@@ -107,6 +107,8 @@ const userscriptClientCode = `
     var logStartIdx = window.__pilot_logs ? window.__pilot_logs.length : 0;
 
     if (hasAwait) {
+      /** 自动在最后一个表达式前添加 return，使 async exec 与 sync eval 行为一致
+       *  支持块语句（if-else、try-catch 等）和简单表达式 */
       var lines = code.split('\\n');
       var lastIdx = -1;
       for (var li = lines.length - 1; li >= 0; li--) {
@@ -118,7 +120,7 @@ const userscriptClientCode = `
       }
       if (lastIdx >= 0) {
         var lastLine = lines[lastIdx].trim();
-        if (!/^return\\b/.test(lastLine) && !/^}/.test(lastLine)) {
+        if (!/^return\\b/.test(lastLine) && !/^}/.test(lastLine) && !/}\\s*$/.test(lastLine)) {
           var semiIdx = lastLine.lastIndexOf(';');
           if (semiIdx !== -1 && semiIdx < lastLine.length - 1) {
             var prefix = lastLine.slice(0, semiIdx + 1);
@@ -129,6 +131,66 @@ const userscriptClientCode = `
           } else {
             lines[lastIdx] = 'return ' + lastLine;
           }
+          code = lines.join('\\n');
+        } else if (/}\\s*$/.test(lastLine)) {
+          var blockLine = lines[lastIdx];
+          var bChars = blockLine.split('');
+          var bDepthStack = [];
+          var bBlocks = [];
+          var bInStr = false, bStrCh = '', bEsc = false;
+          for (var bi = 0; bi < bChars.length; bi++) {
+            var bc = bChars[bi];
+            if (bEsc) { bEsc = false; continue; }
+            if (bc === '\\\\') { bEsc = true; continue; }
+            if (bInStr) { if (bc === bStrCh) bInStr = false; continue; }
+            if (bc === '"' || bc === "'" || bc === '\\\`') { bInStr = true; bStrCh = bc; continue; }
+            if (bc === '{') bDepthStack.push(bi);
+            if (bc === '}' && bDepthStack.length > 0) {
+              bBlocks.push({ start: bDepthStack.pop(), end: bi });
+            }
+          }
+          var bLeafBlocks = [];
+          for (var bbi = 0; bbi < bBlocks.length; bbi++) {
+            var bHasChild = false;
+            for (var bbj = 0; bbj < bBlocks.length; bbj++) {
+              if (bbi !== bbj && bBlocks[bbj].start > bBlocks[bbi].start && bBlocks[bbj].end < bBlocks[bbi].end) {
+                bHasChild = true; break;
+              }
+            }
+            if (!bHasChild) bLeafBlocks.push(bBlocks[bbi]);
+          }
+          var bEdits = [];
+          var BLOCK_KW_RE = /\\b(if|else|for|while|do|try|catch|finally|switch|with)\\b\\s*(\\([^)]*\\)\\s*)*$/;
+          for (var bli = 0; bli < bLeafBlocks.length; bli++) {
+            var bBlock = bLeafBlocks[bli];
+            var bBefore = blockLine.substring(0, bBlock.start).trimEnd();
+            if (!BLOCK_KW_RE.test(bBefore)) continue;
+            var bContent = blockLine.substring(bBlock.start + 1, bBlock.end);
+            var bEndPos = bContent.length;
+            while (bEndPos > 0 && /\\s/.test(bContent[bEndPos - 1])) bEndPos--;
+            while (bEndPos > 0 && bContent[bEndPos - 1] === ';') bEndPos--;
+            while (bEndPos > 0 && /\\s/.test(bContent[bEndPos - 1])) bEndPos--;
+            if (bEndPos === 0) continue;
+            var bExprStart = 0;
+            var bInStr2 = false, bStrCh2 = '', bEsc2 = false;
+            for (var bci = bEndPos - 1; bci >= 0; bci--) {
+              var bcc = bContent[bci];
+              if (bEsc2) { bEsc2 = false; continue; }
+              if (bcc === '\\\\') { bEsc2 = true; continue; }
+              if (bInStr2) { if (bcc === bStrCh2) bInStr2 = false; continue; }
+              if (bcc === '"' || bcc === "'" || bcc === '\\\`') { bInStr2 = true; bStrCh2 = bcc; continue; }
+              if (bcc === ';') { bExprStart = bci + 1; break; }
+            }
+            while (bExprStart < bEndPos && /\\s/.test(bContent[bExprStart])) bExprStart++;
+            if (bExprStart >= bEndPos) continue;
+            var bExpr = bContent.substring(bExprStart, bEndPos);
+            if (/^\\s*return\\b/.test(bExpr)) continue;
+            bEdits.push({ pos: bBlock.start + 1 + bExprStart });
+          }
+          for (var bei = bEdits.length - 1; bei >= 0; bei--) {
+            blockLine = blockLine.substring(0, bEdits[bei].pos) + 'return ' + blockLine.substring(bEdits[bei].pos);
+          }
+          lines[lastIdx] = blockLine;
           code = lines.join('\\n');
         }
       }
