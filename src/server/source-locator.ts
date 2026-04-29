@@ -51,8 +51,8 @@ async function transformVueSfc(code: string, sourceFile: string) {
       nodeTransforms: [
         (node) => {
           if (node.type !== 1) return
-          /** 只处理普通元素和组件，跳过 template/script/style */
-          if (node.tagType !== 0 && node.tagType !== 1) return
+          /** 只处理原生 HTML 元素，跳过组件（组件上的 non-props attributes 会触发 Vue 警告） */
+          if (node.tagType !== 0) return
           if (EXCLUDE_TAGS.includes(node.tag)) return
           if (node.loc.source.includes(KEY_FILE)) return
 

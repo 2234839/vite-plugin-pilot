@@ -18,7 +18,7 @@ function replacePlaceholders(code: string, options: ResolvedPilotOptions, pilotV
     .replace(/__MAX_BUFFER_SIZE__/g, String(options.maxBufferSize))
     .replace(/__FLUSH_INTERVAL__/g, String(options.flushInterval))
     .replace(/__EXEC_TIMEOUT__/g, String(options.execTimeout))
-    .replace(/__MAX_RESULT_SIZE__/g, String(options.maxResultSize))
+
     .replace(/__PILOT_VERSION__/g, pilotVersion)
     .replace(/__LOCALE_SELECTED__/g, '')
     .replace(/__LOCALE_TEXT__/g, '')
@@ -52,7 +52,7 @@ const userscriptClientCode = `
   var myGen = window.__pilot_gen;
 
   var execTimeout = __EXEC_TIMEOUT__;
-  var maxResultSize = __MAX_RESULT_SIZE__;
+
   var serverOrigin = window.__PILOT_SERVER_ORIGIN__;
 
   function serializeResult(val) {
@@ -62,9 +62,6 @@ const userscriptClientCode = `
     else if (typeof val === 'function') str = '[Function: ' + (val.name || 'anonymous') + ']';
     else if (typeof val === 'string') str = val;
     else { try { str = JSON.stringify(val, null, 2); } catch(e) { str = String(val); } }
-    if (str.length > maxResultSize) {
-      str = str.slice(0, maxResultSize) + '\\n... [truncated, ' + str.length + ' chars total]';
-    }
     return str;
   }
 

@@ -18,7 +18,6 @@ export const wsClientCode = `
   }
 
   var execTimeout = __EXEC_TIMEOUT__;
-  var maxResultSize = __MAX_RESULT_SIZE__;
 
   function serializeResult(val) {
     var str;
@@ -27,9 +26,6 @@ export const wsClientCode = `
     else if (typeof val === 'function') str = '[Function: ' + (val.name || 'anonymous') + ']';
     else if (typeof val === 'string') str = val;
     else { try { str = JSON.stringify(val, null, 2); } catch(e) { str = String(val); } }
-    if (str.length > maxResultSize) {
-      str = str.slice(0, maxResultSize) + '\\n... [truncated, ' + str.length + ' chars total]';
-    }
     return str;
   }
 

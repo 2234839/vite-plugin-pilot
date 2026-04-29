@@ -53,7 +53,7 @@ export const DEFAULT_OPTIONS = {
   maxBufferSize: 200,
   flushInterval: 1000,
   execTimeout: 15000,
-  maxResultSize: 100 * 1024,
+
   /** Alt+Click 元素检查器，默认开启 */
   inspector: true,
   /** 操作元素时显示高亮聚焦效果，默认开启 */

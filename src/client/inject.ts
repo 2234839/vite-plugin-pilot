@@ -78,7 +78,7 @@ export function buildInjectScript(options: ResolvedPilotOptions, pilotVersion?: 
         .replace(/__MAX_BUFFER_SIZE__/g, String(options.maxBufferSize))
         .replace(/__FLUSH_INTERVAL__/g, String(options.flushInterval))
         .replace(/__EXEC_TIMEOUT__/g, String(options.execTimeout))
-        .replace(/__MAX_RESULT_SIZE__/g, String(options.maxResultSize))
+
         .replace(/__PILOT_VERSION__/g, version)
         .replace(/__LOCALE_SELECTED__/g, locale.selected)
         .replace(/__LOCALE_TEXT__/g, locale.text)

@@ -8,8 +8,7 @@ export interface PilotOptions {
   flushInterval?: number
   /** 远程执行超时时间（ms），默认 5000 */
   execTimeout?: number
-  /** 执行结果最大字节数，默认 100KB */
-  maxResultSize?: number
+
   /** Alt+Click 元素检查器，默认开启。设为 false 禁用 */
   inspector?: boolean
   /** 操作元素时显示高亮聚焦效果（蓝色虚线边框），默认开启 */

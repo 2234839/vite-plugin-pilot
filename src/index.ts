@@ -34,7 +34,7 @@ export function pilot(userOptions: PilotOptions = {}): Plugin {
       maxBufferSize: userOptions.maxBufferSize ?? DEFAULT_OPTIONS.maxBufferSize,
       flushInterval: userOptions.flushInterval ?? DEFAULT_OPTIONS.flushInterval,
       execTimeout: userOptions.execTimeout ?? DEFAULT_OPTIONS.execTimeout,
-      maxResultSize: userOptions.maxResultSize ?? DEFAULT_OPTIONS.maxResultSize,
+
       inspector: userOptions.inspector ?? DEFAULT_OPTIONS.inspector,
       highlight: userOptions.highlight ?? DEFAULT_OPTIONS.highlight,
       locale: userOptions.locale ?? DEFAULT_OPTIONS.locale,
