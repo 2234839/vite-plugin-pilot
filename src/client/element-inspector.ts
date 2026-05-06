@@ -201,6 +201,15 @@ export const elementInspectorCode = `
     }
   }
 
+  /** 窗口失焦时重置选择状态（Alt+Tab 切走后 keyup 不会触发） */
+  function onWindowBlur() {
+    if (active && !panelOpen) {
+      active = false;
+      hideHighlight();
+      document.body.style.cursor = '';
+    }
+  }
+
   function onMouseMove(e) {
     if (!active) return;
     /** 出现其他修饰键时不高亮（防御性检查） */
@@ -213,6 +222,8 @@ export const elementInspectorCode = `
 
   function onClick(e) {
     if (!active || !currentTarget) return;
+    /** 页面未获焦时不触发（Alt+Tab 回来后的残留点击） */
+    if (!document.hasFocus()) return;
     /** 组合键（Ctrl+Click、Shift+Click 等）不触发选择面板 */
     if (e.ctrlKey || e.shiftKey || e.metaKey) return;
     e.preventDefault();
@@ -449,5 +460,6 @@ export const elementInspectorCode = `
   document.addEventListener('keyup', onAltKeyUp);
   document.addEventListener('mousemove', onMouseMove, true);
   document.addEventListener('click', onClick, true);
+  window.addEventListener('blur', onWindowBlur);
 })();
 `
