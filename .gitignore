@@ -1,6 +1,5 @@
 .claude/scheduled_tasks.lock
 node_modules
-CLAUDE.md
 
 .pilot
 dist
