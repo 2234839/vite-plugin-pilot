@@ -42,19 +42,19 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.6.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.1",
     "@vitejs/plugin-vue": "^6.0.6",
-    "@vue/compiler-dom": "^3.5.33",
+    "@vue/compiler-dom": "^3.5.34",
     "magic-string": "^0.30.21",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10",
-    "vue": "^3.5.33",
+    "vite": "^8.0.11",
+    "vue": "^3.5.34",
     "ws": "^8.20.0"
   },
   "keywords": [
