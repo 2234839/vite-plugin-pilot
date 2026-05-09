@@ -203,8 +203,8 @@ export const elementInspectorCode = `
     }
   }
 
-  /** 窗口失焦时重置选择状态（Alt+Tab 切走后 keyup 不会触发） */
-  function onWindowBlur() {
+  /** 页面不可见时重置选择状态（Alt+Tab 切走后 keyup 不会触发） */
+  function deactivateIfNotFocused() {
     if (active && !panelOpen) {
       active = false;
       hideHighlight();
@@ -462,6 +462,9 @@ export const elementInspectorCode = `
   document.addEventListener('keyup', onAltKeyUp);
   document.addEventListener('mousemove', onMouseMove, true);
   document.addEventListener('click', onClick, true);
-  window.addEventListener('blur', onWindowBlur);
+  window.addEventListener('blur', deactivateIfNotFocused);
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) deactivateIfNotFocused();
+  });
 })();
 `
