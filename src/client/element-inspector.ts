@@ -179,13 +179,15 @@ export const elementInspectorCode = `
   }
 
   function onAltKeyDown(e) {
-    /** 仅单独按下 Alt 键时激活选择模式，组合键（Ctrl+Alt、Alt+Shift 等）不触发 */
-    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && !active) {
+    if (panelOpen) return;
+    /** 仅单独按下 Alt 键时激活选择模式 */
+    if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey && !active) {
       active = true;
       document.body.style.cursor = 'crosshair';
+      return;
     }
-    /** Alt 已激活时，出现其他修饰键立即取消（防止 Ctrl+Alt 组合仍高亮） */
-    if (active && (e.ctrlKey || e.shiftKey || e.metaKey) && !panelOpen) {
+    /** 任何其他按键（Tab、字母等）或组合键修饰键出现，立即取消选择状态 */
+    if (active && e.key !== 'Alt') {
       active = false;
       hideHighlight();
       document.body.style.cursor = '';
