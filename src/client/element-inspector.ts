@@ -100,16 +100,26 @@ export const elementInspectorCode = `
     return parts.join(' > ');
   }
 
+  /** 获取 body 累积 zoom 值（宿主页面 CSS zoom 导致 gBR 与 position:fixed 坐标系不一致） */
+  function getBodyZoom() {
+    if ('currentCSSZoom' in Element.prototype) {
+      return document.body.currentCSSZoom || 1;
+    }
+    var z = parseFloat(getComputedStyle(document.body).zoom);
+    return (z > 0) ? z : 1;
+  }
+
   function showHighlight(el) {
     if (!overlay) createOverlay();
 
     currentTarget = el;
     var rect = el.getBoundingClientRect();
+    var zoom = getBodyZoom();
     overlay.style.display = 'block';
-    overlay.style.left = rect.left + 'px';
-    overlay.style.top = rect.top + 'px';
-    overlay.style.width = rect.width + 'px';
-    overlay.style.height = rect.height + 'px';
+    overlay.style.left = (rect.left / zoom) + 'px';
+    overlay.style.top = (rect.top / zoom) + 'px';
+    overlay.style.width = (rect.width / zoom) + 'px';
+    overlay.style.height = (rect.height / zoom) + 'px';
 
     /** 构建 tooltip 内容 */
     var lines = [];
@@ -131,17 +141,17 @@ export const elementInspectorCode = `
 
     tooltip.innerHTML = lines.join('<br>');
     tooltip.style.display = 'block';
-    tooltip.style.left = (rect.left + rect.width + 8) + 'px';
-    tooltip.style.top = rect.top + 'px';
+    tooltip.style.left = ((rect.left + rect.width) / zoom + 8) + 'px';
+    tooltip.style.top = (rect.top / zoom) + 'px';
 
-    /** 防止 tooltip 溢出右侧 */
+    /** 防止 tooltip 溢出视口（gBR 值已含 zoom，可直接与 innerWidth 比较；fallback 位置需除以 zoom 回到 fixed 坐标系） */
     requestAnimationFrame(function() {
       var tr = tooltip.getBoundingClientRect();
       if (tr.right > window.innerWidth) {
-        tooltip.style.left = (rect.left - tr.width - 8) + 'px';
+        tooltip.style.left = ((rect.left - tr.width) / zoom - 8) + 'px';
       }
       if (tr.bottom > window.innerHeight) {
-        tooltip.style.top = (rect.bottom - tr.height) + 'px';
+        tooltip.style.top = ((rect.bottom - tr.height) / zoom) + 'px';
       }
     });
   }

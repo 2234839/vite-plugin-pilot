@@ -437,17 +437,27 @@ export const snapshotCode = `
     cornerWrap.appendChild(createCorner('br'));
     document.body.appendChild(cornerWrap);
 
-    /** 更新 overlay 和角标位置 */
+    /** 获取 body 累积 zoom 值 */
+    function getZoom() {
+      if ('currentCSSZoom' in Element.prototype) {
+        return document.body.currentCSSZoom || 1;
+      }
+      var z = parseFloat(getComputedStyle(document.body).zoom);
+      return (z > 0) ? z : 1;
+    }
+
+    /** 更新 overlay 和角标位置（校正 CSS zoom 偏移） */
     function updatePosition() {
       var rect = el.getBoundingClientRect();
-      overlay.style.top = rect.top + 'px';
-      overlay.style.left = rect.left + 'px';
-      overlay.style.width = rect.width + 'px';
-      overlay.style.height = rect.height + 'px';
-      cornerWrap.style.top = rect.top + 'px';
-      cornerWrap.style.left = rect.left + 'px';
-      cornerWrap.style.width = rect.width + 'px';
-      cornerWrap.style.height = rect.height + 'px';
+      var zoom = getZoom();
+      overlay.style.top = (rect.top / zoom) + 'px';
+      overlay.style.left = (rect.left / zoom) + 'px';
+      overlay.style.width = (rect.width / zoom) + 'px';
+      overlay.style.height = (rect.height / zoom) + 'px';
+      cornerWrap.style.top = (rect.top / zoom) + 'px';
+      cornerWrap.style.left = (rect.left / zoom) + 'px';
+      cornerWrap.style.width = (rect.width / zoom) + 'px';
+      cornerWrap.style.height = (rect.height / zoom) + 'px';
     }
 
     var resizeObserver = new ResizeObserver(updatePosition);
