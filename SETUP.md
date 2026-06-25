@@ -40,7 +40,7 @@
 已安装。`npx pilot run '代码'` 执行 JS（返回运行时日志+快照）、`npx pilot page` 页面状态
 `npx pilot help`  查看pilot所有功能
 常用：`__pilot_clickByText("文本")` 点击、`__pilot_typeByPlaceholder("提示文字", "值")` 输入、`__pilot_waitFor("文本")` 等待、`__pilot_findByText("文本")` 查找。snapshot 中 `#N` 是元素索引。
-多 tab 时用 `npx pilot status` 查看实例列表，`npx pilot run '代码' instance:前缀` 指定目标实例（支持 ID 前缀模糊匹配）。
+代码里可直接 `return 结果` 返回值、`console.log(...)` 或 `log(...)` 上报日志（均会被采集，异步回调里的日志也能捕获）。多 tab 时用 `npx pilot status` 查看实例列表，`npx pilot run '代码' instance:前缀` 指定目标实例（支持 ID 前缀模糊匹配）。
 ````
 
 **重要**：不要删除或覆盖文件中的已有内容，只追加。

@@ -764,6 +764,7 @@ async function main() {
 
 其他:
   __pilot_wait(ms)                      等待毫秒
+  log(...)                              显式上报日志（支持 async 回调，exec 后保留 ~300ms 收集）
   __pilot_snapshot()                    获取完整 JSON 快照
   __pilot_scrollIntoView(i)             滚动到元素
   __pilot_getRect(i)                    获取元素位置

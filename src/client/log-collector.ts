@@ -44,6 +44,9 @@ export const logCollectorCode = `
     } catch(e) { return String(arg); }
   }
 
+  /** 暴露 stringify 给 ws-client / userscript 复用：显式 log() 与 console 拦截使用同一格式化逻辑 */
+  window.__pilot_stringify = stringify;
+
   /** 存储最近 3 条错误信息，供 snapshot 采集 */
   window.__pilot_lastErrors = [];
   /** 暴露日志数组，ws-client 在 exec 前后截取新增日志附加到 result */

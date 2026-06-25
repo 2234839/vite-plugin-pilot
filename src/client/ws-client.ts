@@ -45,6 +45,34 @@ export const wsClientCode = `
     };
   }
 
+  /** 当前 exec 专属的显式日志队列指针。exec 开始时置为新数组，grace 窗口结束后置 null（关闭接收） */
+  var currentExecLogs = null;
+
+  /** 构造绑定到 currentExecLogs 的 log 函数，作为 IIFE 形参注入用户代码。
+   *  每次调用：实时 push 到当前 exec 队列（主通道），同时打到 console（保持开发者可见 + 触发 log-collector 兜底拦截） */
+  function makeExecLog() {
+    return function log() {
+      /** exec 已结束且 grace 窗口已过，丢弃（防延后回调污染或泄漏） */
+      if (!currentExecLogs) return;
+      var stringify = window.__pilot_stringify;
+      var msg = stringify
+        ? Array.prototype.map.call(arguments, stringify).join(' ')
+        : Array.prototype.join.call(arguments, ' ');
+      currentExecLogs.push('[log] ' + msg);
+      /** 同步打到浏览器 console：开发者可见，且被 log-collector 拦截进 __pilot_logs 作为兜底 */
+      try { console.log.apply(console, arguments); } catch(e) {}
+    };
+  }
+
+  /** 合并两路日志：console 拦截（getLogsSince，含上下文+exec 期间）+ 显式 log() 队列。按时序拼接，不去重 */
+  function collectLogs(logStartIdx, execLogs) {
+    var consoleLogs = getLogsSince(logStartIdx);
+    if (execLogs && execLogs.length > 0) {
+      return consoleLogs.concat(execLogs);
+    }
+    return consoleLogs;
+  }
+
   /** 已知的噪音日志关键词，匹配时不纳入 exec 日志以节省 token */
   var LOG_NOISE = ['[Vue warn]', '[vite]', '[COSE]', '[Pilot] Running'];
 
@@ -107,163 +135,56 @@ export const wsClientCode = `
     /** 清空操作元素记录（每次 exec 重新开始） */
     window.__pilot_operated = [];
     window.__pilot_operatedLabels = [];
-    /** 检测是否需要 async 执行（显式 await 或调用返回 Promise 的辅助函数） */
-    var hasAwait = /\\bawait\\b/.test(code) || code.indexOf('__pilot_waitFor(') !== -1 || code.indexOf('__pilot_wait(') !== -1
-      || code.indexOf('__pilot_typeByPlaceholder(') !== -1 || code.indexOf('__pilot_type(') !== -1
-      || code.indexOf('__pilot_checkMultipleByText(') !== -1 || code.indexOf('__pilot_waitEnabled(') !== -1;
+    /** 重置本次 exec 的显式日志队列 */
+    currentExecLogs = [];
+    /** 闭包捕获本次队列引用：grace 回调只读 myLogs，防止 exec 交叉污染 */
+    var myLogs = currentExecLogs;
     /** 记录 exec 开始时的日志位置，用于截取 exec 期间产生的新日志 */
     var logStartIdx = window.__pilot_logs ? window.__pilot_logs.length : 0;
+    /** grace 窗口：IIFE settle 后再等 N ms，收集 setTimeout/Promise.then 等延后回调产生的日志 */
+    var grace = 300;
+    var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 
-    if (hasAwait) {
-      /** 自动在最后一个表达式前添加 return，使 async exec 与 sync eval 行为一致
-       *  支持块语句（if-else、try-catch 等）和简单表达式
-       *  用法: await __pilot_wait(100); __pilot_clickByText("提交")
-       *  用法: if (btn) { btn.click(); "CLICKED" } else { "NOT_FOUND" }  → 自动 return */
-      var lines = code.split('\\n');
-      var lastIdx = -1;
-      for (var li = lines.length - 1; li >= 0; li--) {
-        var trimmed = lines[li].trim();
-        if (trimmed && trimmed !== '}' && !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*')) {
-          lastIdx = li;
-          break;
-        }
-      }
-      if (lastIdx >= 0) {
-        var lastLine = lines[lastIdx].trim();
-        if (!/^return\\b/.test(lastLine) && !/^}/.test(lastLine) && !/}\\s*$/.test(lastLine)) {
-          /** 单行含分号时，提取最后一个 ; 后的表达式加 return（避免 return await 导致后续表达式不可达） */
-          var semiIdx = lastLine.lastIndexOf(';');
-          if (semiIdx !== -1 && semiIdx < lastLine.length - 1) {
-            var prefix = lastLine.slice(0, semiIdx + 1);
-            var suffix = lastLine.slice(semiIdx + 1).trim();
-            if (suffix && !/^return\\b/.test(suffix)) {
-              lines[lastIdx] = prefix + ' return ' + suffix;
-            }
-          } else {
-            lines[lastIdx] = 'return ' + lastLine;
-          }
-          code = lines.join('\\n');
-        } else if (/}\\s*$/.test(lastLine)) {
-          /** 最后一行以 } 结尾：可能是 if-else、try-catch 等块语句
-           *  在每个块语句的叶子块（最内层 {} 对）的最后一个表达式前加 return */
-          var blockLine = lines[lastIdx];
-          var bChars = blockLine.split('');
-          var bDepthStack = [];
-          var bBlocks = [];
-          var bInStr = false, bStrCh = '', bEsc = false;
-          for (var bi = 0; bi < bChars.length; bi++) {
-            var bc = bChars[bi];
-            if (bEsc) { bEsc = false; continue; }
-            if (bc === '\\\\') { bEsc = true; continue; }
-            if (bInStr) { if (bc === bStrCh) bInStr = false; continue; }
-            if (bc === '"' || bc === "'" || bc === '\\\`') { bInStr = true; bStrCh = bc; continue; }
-            if (bc === '{') bDepthStack.push(bi);
-            if (bc === '}' && bDepthStack.length > 0) {
-              bBlocks.push({ start: bDepthStack.pop(), end: bi });
-            }
-          }
-          var bLeafBlocks = [];
-          for (var bbi = 0; bbi < bBlocks.length; bbi++) {
-            var bHasChild = false;
-            for (var bbj = 0; bbj < bBlocks.length; bbj++) {
-              if (bbi !== bbj && bBlocks[bbj].start > bBlocks[bbi].start && bBlocks[bbj].end < bBlocks[bbi].end) {
-                bHasChild = true; break;
-              }
-            }
-            if (!bHasChild) bLeafBlocks.push(bBlocks[bbi]);
-          }
-          var bEdits = [];
-          var BLOCK_KW_RE = /\\b(if|else|for|while|do|try|catch|finally|switch|with)\\b\\s*(\\([^)]*\\)\\s*)*$/;
-          for (var bli = 0; bli < bLeafBlocks.length; bli++) {
-            var bBlock = bLeafBlocks[bli];
-            var bBefore = blockLine.substring(0, bBlock.start).trimEnd();
-            if (!BLOCK_KW_RE.test(bBefore)) continue;
-            var bContent = blockLine.substring(bBlock.start + 1, bBlock.end);
-            var bEndPos = bContent.length;
-            while (bEndPos > 0 && /\\s/.test(bContent[bEndPos - 1])) bEndPos--;
-            while (bEndPos > 0 && bContent[bEndPos - 1] === ';') bEndPos--;
-            while (bEndPos > 0 && /\\s/.test(bContent[bEndPos - 1])) bEndPos--;
-            if (bEndPos === 0) continue;
-            var bExprStart = 0;
-            var bInStr2 = false, bStrCh2 = '', bEsc2 = false;
-            for (var bci = bEndPos - 1; bci >= 0; bci--) {
-              var bcc = bContent[bci];
-              if (bEsc2) { bEsc2 = false; continue; }
-              if (bcc === '\\\\') { bEsc2 = true; continue; }
-              if (bInStr2) { if (bcc === bStrCh2) bInStr2 = false; continue; }
-              if (bcc === '"' || bcc === "'" || bcc === '\\\`') { bInStr2 = true; bStrCh2 = bcc; continue; }
-              if (bcc === ';') { bExprStart = bci + 1; break; }
-            }
-            while (bExprStart < bEndPos && /\\s/.test(bContent[bExprStart])) bExprStart++;
-            if (bExprStart >= bEndPos) continue;
-            var bExpr = bContent.substring(bExprStart, bEndPos);
-            if (/^\\s*return\\b/.test(bExpr)) continue;
-            bEdits.push({ pos: bBlock.start + 1 + bExprStart });
-          }
-          for (var bei = bEdits.length - 1; bei >= 0; bei--) {
-            blockLine = blockLine.substring(0, bEdits[bei].pos) + 'return ' + blockLine.substring(bEdits[bei].pos);
-          }
-          lines[lastIdx] = blockLine;
-          code = lines.join('\\n');
-        }
-      }
-      var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-      return new Promise(function(resolve) {
-        var timeoutId = setTimeout(function() {
-          resolve(makeResult(code, undefined, false, 'Execution timeout after ' + execTimeout + 'ms'));
-        }, execTimeout);
+    /** 统一走 async IIFE：用户代码作为 AsyncFunction 函数体，log 作为形参注入。
+     *  函数体天然支持顶层 return 和 await，无需启发式 return 注入 */
+    return new Promise(function(resolve) {
+      var settled = false;
+      /** timeout 不含 grace：代码卡死超时立即失败，不等 grace */
+      var timeoutId = setTimeout(function() {
+        if (settled) return; settled = true;
+        currentExecLogs = null;
+        resolve(makeResult(code, undefined, false, 'Execution timeout after ' + execTimeout + 'ms', collectLogs(logStartIdx, myLogs)));
+      }, execTimeout);
 
-        try {
-          var fn = new AsyncFunction(code);
-          fn().then(function(result) {
-            clearTimeout(timeoutId);
-            resolve(makeResult(code, result, true, undefined, getLogsSince(logStartIdx)));
-          }).catch(function(e) {
-            clearTimeout(timeoutId);
-            resolve(makeResult(code, undefined, false, e.message || String(e), getLogsSince(logStartIdx)));
-          });
-        } catch(e) {
+      try {
+        var fn = new AsyncFunction('log', code);
+        fn(makeExecLog()).then(function(result) {
+          if (settled) return;
           clearTimeout(timeoutId);
-          resolve(makeResult(code, undefined, false, e.message || String(e)));
-        }
-      });
-    }
-
-    var result;
-    var success = true;
-    var errorMsg = '';
-
-    var timeoutId = setTimeout(function() {
-      throw new Error('Execution timeout after ' + execTimeout + 'ms');
-    }, execTimeout);
-
-    try {
-      /** 支持 return 语句：检测顶层 return 并用 IIFE 包裹 */
-      var hasTopReturn = false;
-      var depth = 0;
-      for (var ci = 0; ci < code.length; ci++) {
-        var ch = code[ci];
-        if (ch === '(' || ch === '{' || ch === '[') depth++;
-        else if (ch === ')' || ch === '}' || ch === ']') depth--;
-        else if (depth === 0 && code.slice(ci, ci + 6) === 'return' && (ci + 6 >= code.length || /[^a-zA-Z0-9_$]/.test(code[ci + 6])) && (ci === 0 || /[^a-zA-Z0-9_$]/.test(code[ci - 1]))) {
-          hasTopReturn = true;
-          break;
-        }
+          /** grace 窗口：等待延后回调的 log()/console.log 落盘 */
+          setTimeout(function() {
+            if (settled) return; settled = true;
+            currentExecLogs = null;
+            resolve(makeResult(code, result, true, undefined, collectLogs(logStartIdx, myLogs)));
+          }, grace);
+        }).catch(function(e) {
+          if (settled) return;
+          clearTimeout(timeoutId);
+          /** 出错也走 grace 窗口：错误发生后的回调日志同样有价值 */
+          setTimeout(function() {
+            if (settled) return; settled = true;
+            currentExecLogs = null;
+            resolve(makeResult(code, undefined, false, e.message || String(e), collectLogs(logStartIdx, myLogs)));
+          }, grace);
+        });
+      } catch(e) {
+        /** SyntaxError 等 new AsyncFunction 构造期错误 */
+        if (settled) return; settled = true;
+        clearTimeout(timeoutId);
+        currentExecLogs = null;
+        resolve(makeResult(code, undefined, false, e.message || String(e), collectLogs(logStartIdx, myLogs)));
       }
-      if (hasTopReturn) {
-        result = (0, eval)('(function() { ' + code + ' })()');
-      } else {
-        result = (0, eval)(code);
-      }
-    } catch(e) {
-      success = false;
-      errorMsg = e.message || String(e);
-      result = undefined;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    return makeResult(code, result, success, errorMsg, getLogsSince(logStartIdx));
+    });
   }
 
   /** 构建 API URL（Console Bridge 模式下使用绝对 URL 连接 dev server） */
