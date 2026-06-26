@@ -136,16 +136,14 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   let hintDismissed = false
 
   /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用）
-   *  输出结构：runcode → 返回值/ERROR → exec 日志 → 上下文日志 → 页面快照
+   *  输出结构：返回值/ERROR → exec 日志 → 上下文日志 → 页面快照
    *  设计原则：agent 最关心的是「执行是否成功」和「返回了什么」，放在最前面 */
   function formatRunResult(result: ExecResult | null | undefined, opts: WaiterOptions): string {
     if (!result) return 'TIMEOUT'
 
-    /** 优先使用 CLI 传入的原始代码，fallback 到客户端返回的 result.code */
+    /** 优先使用 CLI 传入的原始代码，fallback 到客户端返回的 result.code（用于 hint 检测） */
     const codeSource = opts.runCode || (typeof result.code === 'string' ? result.code : '')
-    const codePreview = codeSource.slice(0, 200).replace(/\n/g, ' ')
     const lines: string[] = []
-    lines.push(`--- runcode --- ${codePreview}`)
 
     /** logs 按 "---" 分隔：客户端返回的顺序是 contextLogs, ---, execLogs */
     let execLogs: string[] = []
