@@ -68,8 +68,9 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   /** 实例目录的 fs.watch 监听器（每个实例一个，多 SSE 连接共享） */
   const instanceWatchers: Record<string, FSWatcher> = {}
 
-  /** 向指定实例的所有 SSE 连接广播代码 */
+  /** 向指定实例的所有 SSE 连接广播代码，并记录已广播的 code 供 checkAndBroadcast 防重复 */
   function broadcastCode(instanceId: string, code: string): void {
+    lastDispatchedCode[instanceId] = code
     const connections = sseConnections[instanceId]
     if (!connections || connections.length === 0) return
     for (const res of connections) {
@@ -77,15 +78,16 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
     }
   }
 
-  /** 写 pending.js 并通过 SSE 广播代码给浏览器（同时写文件供 CLI 文件通道使用）
+  /** 通过 SSE 广播代码给浏览器，同时写 pending.js 供轮询通道（userscript SSE 断线 fallback）消费
    *  记录已广播的 code，防止 fs.watch 的 checkAndBroadcast 重复推送 */
   function dispatchCode(instanceId: string, code: string): void {
     bridge.clearExecResult(instanceId)
     bridge.clearExecDone(instanceId)
     lastBrowserActivity[instanceId] = Date.now()
     broadcastCode(instanceId, code)
-    /** SSE 推送成功后清理 pending.js，避免过期文件残留 */
-    bridge.clearPendingJs(instanceId)
+    /** 同步写 pending.js：SSE 不可达（userscript 走轮询 fallback）的实例可通过 has-code 端点消费。
+     *  has-code 读取即删除（消费语义），不会重复执行；SSE 实例的 checkAndBroadcast 由 lastDispatchedCode 防重复 */
+    bridge.writePendingJs(code, instanceId)
   }
 
   /** 根据 locale 决定提示语言 */
@@ -135,6 +137,18 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
   /** 是否已提示过辅助函数（一旦 agent 使用 __pilot_ 函数就停止提示，dev server 重启后重置） */
   let hintDismissed = false
 
+  /** 生成返回值的规模标注（行数 + 字符数）。
+   *  不截断返回值本身——pilot 不替 agent 决定要看多少；只如实告知数据规模，
+   *  agent 据此自行判断是否需要 head/压缩/缩小查询。pilot 无法感知 agent 自己的 tail 截断，
+   *  但 pilot 这一层的输出是完整的，规模标注让 agent 在看到返回值时就知道它有多大 */
+  function resultSizeLabel(raw: string): string {
+    if (!raw) return ''
+    const lineCount = raw.split('\n').length
+    return isZh
+      ? '↳ 返回值 ' + lineCount + ' 行 / ' + raw.length + ' 字符'
+      : '↳ result ' + lineCount + ' lines / ' + raw.length + ' chars'
+  }
+
   /** 格式化 run 请求的返回值（POST /result 和 GET /result-img 共用）
    *  输出结构：返回值/ERROR → exec 日志 → 上下文日志 → 页面快照
    *  设计原则：agent 最关心的是「执行是否成功」和「返回了什么」，放在最前面 */
@@ -164,7 +178,12 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
      *  过滤为空避免噪音。有实际返回值时原样输出，null 保留（可能是有效的查询结果） */
     if (result.success) {
       const raw = String(result.result ?? '')
-      if (raw && raw !== 'undefined') lines.push(raw)
+      if (raw && raw !== 'undefined') {
+        /** 返回值原样输出（不截断），前面标注规模，让 agent 知道数据有多大、自行决定如何处理 */
+        const label = resultSizeLabel(raw)
+        if (label) lines.push(label)
+        lines.push(raw)
+      }
     } else {
       const errorMsg = result.error || 'unknown'
       lines.push(`ERROR: ${errorMsg}`)
@@ -437,6 +456,8 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           bridge.writeExecDone(instanceId)
           /** exec 完成后清除已广播标记，允许后续相同 code 的请求被正常推送 */
           delete lastDispatchedCode[instanceId]
+          /** 清除 dispatchCode 写入的 pending.js，避免轮询实例读到已执行的旧 code */
+          bridge.clearPendingJs(instanceId)
           /** 通知队首等待者 */
           notifyWaiter(instanceId, result, clientSnapshot)
           return { success: true }
