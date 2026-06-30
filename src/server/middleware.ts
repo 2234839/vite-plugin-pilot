@@ -782,21 +782,27 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       wRes.writeHead(200, { 'Content-Type': 'text/plain' })
       wRes.end(formatRunResult(result, wOpts))
     } else if (wOpts?.type === 'page') {
-      /** GET /__pilot/page?fresh=1 请求：返回纯文本 compact snapshot */
-      if (result?.success && typeof result.result === 'string') {
+      /** GET /__pilot/page?fresh=1 请求：返回纯文本 compact snapshot
+       *  result.result 可能是合法的双层序列化 snapshot JSON，也可能是 "undefined"（采集代码在
+       *  __pilot_snapshot 未注入时返回 undefined 被序列化成字符串）。任何无效情况都 fallback 到缓存，
+       *  绝不把 "undefined" 或解析失败的原始内容吐给客户端 */
+      let fullText: string | null = null
+      if (result?.success && typeof result.result === 'string' && result.result !== 'undefined') {
         try {
-          const data = JSON.parse(typeof JSON.parse(result.result) === 'string' ? JSON.parse(result.result) : result.result)
-          const rawEls = data.els ?? data.visibleElements
+          /** snapshot 被双层序列化：先解一层，若仍是字符串再解一层 */
+          const inner = JSON.parse(result.result)
+          const data = typeof inner === 'string' ? JSON.parse(inner) : inner
+          const rawEls = data?.els ?? data?.visibleElements
           if (Array.isArray(rawEls) && rawEls.length > 0) {
-            const { fullText } = getCompactText(data)
+            const compact = getCompactText(data)
+            fullText = compact.fullText
             bridge.writeCompactSnapshot(fullText, targetId)
-            wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-            wRes.end(fullText)
           }
-        } catch {
-          wRes.writeHead(200, { 'Content-Type': 'text/plain' })
-          wRes.end(result.result)
-        }
+        } catch { /** 解析失败：fullText 保持 null，下面走缓存 fallback */ }
+      }
+      if (fullText) {
+        wRes.writeHead(200, { 'Content-Type': 'text/plain' })
+        wRes.end(fullText)
       } else {
         const cached = bridge.readCompactSnapshot(targetId)
         wRes.writeHead(200, { 'Content-Type': 'text/plain' })
