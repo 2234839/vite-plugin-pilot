@@ -190,14 +190,14 @@ export const elementInspectorCode = `
 
   function onAltKeyDown(e) {
     if (panelOpen) return;
-    /** 仅单独按下 Alt 键时激活选择模式 */
-    if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey && !active) {
+    /** Alt+Shift+Click 直接跳转源码，Shift 键不应取消选择模式 */
+    if (e.key === 'Alt' && !e.ctrlKey && !e.metaKey && !active) {
       active = true;
       document.body.style.cursor = 'crosshair';
       return;
     }
     /** 任何其他按键（Tab、字母等）或组合键修饰键出现，立即取消选择状态 */
-    if (active && e.key !== 'Alt') {
+    if (active && e.key !== 'Alt' && e.key !== 'Shift') {
       active = false;
       hideHighlight();
       document.body.style.cursor = '';
@@ -224,25 +224,89 @@ export const elementInspectorCode = `
 
   function onMouseMove(e) {
     if (!active) return;
-    /** 页面未获焦时重置状态（Alt+Tab 后 blur 可能未触发） */
-    if (!document.hasFocus()) {
-      onDeactivate();
-      return;
-    }
-    /** 出现其他修饰键时不高亮（防御性检查） */
-    if (e.ctrlKey || e.shiftKey || e.metaKey) return;
+    /** Ctrl/Meta 修饰键时不高亮；Shift 放行（Alt+Shift+Click 跳转需要先高亮目标） */
+    if (e.ctrlKey || e.metaKey) return;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     if (el && el !== document.body && el !== document.documentElement) {
       showHighlight(el);
     }
   }
 
+  /** 滚轮切换父子元素（参考 code-inspector-plugin）：
+   *  Alt 选择模式下，向上滚动 → 切换至父元素，向下滚动 → 切换至子元素 */
+  function onWheel(e) {
+    if (!active || !currentTarget || panelOpen) return;
+    /** Alt+Shift+滚轮是浏览器缩放快捷键，不拦截 */
+    if (e.shiftKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    /** 滚轮步进去抖：触控板高频滚动时累积 delta，超过阈值才切换一级 */
+    if (Math.abs(e.deltaY) < 15) return;
+    var goingUp = e.deltaY < 0;
+
+    var next = null;
+    if (goingUp) {
+      /** 向上滚动：父元素（可穿越 shadow boundary） */
+      if (currentTarget.parentElement) {
+        next = currentTarget.parentElement;
+      } else {
+        var root = currentTarget.getRootNode();
+        if (root && root.host) next = root.host;
+      }
+      /** 父元素到顶（body/html）时不再切换 */
+      if (next === document.body || next === document.documentElement) next = null;
+    } else {
+      /** 向下滚动：优先回到鼠标悬停的子树内元素，否则取几何中心命中的子元素 */
+      var rect = currentTarget.getBoundingClientRect();
+      var cx = Math.min(Math.max(e.clientX, rect.left + 1), rect.right - 1);
+      var cy = Math.min(Math.max(e.clientY, rect.top + 1), rect.bottom - 1);
+      var hit = document.elementFromPoint(cx, cy);
+      if (hit && hit !== currentTarget && isDescendant(currentTarget, hit)) {
+        /** hit 是 currentTarget 的后代：取其直接属于 currentTarget 的那层祖先 */
+        next = hit;
+        while (next && next.parentElement !== currentTarget && next.parentElement) {
+          var r = next.getRootNode();
+          if (next.parentElement) { next = next.parentElement; }
+          else if (r && r.host) { next = r.host; }
+          else break;
+        }
+      } else {
+        /** 兜底：第一个可见的 element 子节点 */
+        var children = currentTarget.children;
+        for (var i = 0; i < children.length; i++) {
+          var cr = children[i].getBoundingClientRect();
+          if (cr.width > 0 && cr.height > 0) { next = children[i]; break; }
+        }
+      }
+    }
+
+    if (next && next !== document.body && next !== document.documentElement) {
+      showHighlight(next);
+    }
+  }
+
+  /** 判断 maybeChild 是否是 ancestor 的后代（支持 shadow DOM） */
+  function isDescendant(ancestor, maybeChild) {
+    var cur = maybeChild;
+    while (cur) {
+      if (cur === ancestor) return true;
+      if (cur.parentElement) {
+        cur = cur.parentElement;
+      } else {
+        var root = cur.getRootNode();
+        cur = (root && root.host) ? root.host : null;
+      }
+    }
+    return false;
+  }
+
   function onClick(e) {
     if (!active || !currentTarget) return;
-    /** 页面未获焦时不触发（Alt+Tab 回来后的残留点击） */
-    if (!document.hasFocus()) return;
-    /** 组合键（Ctrl+Click、Shift+Click 等）不触发选择面板 */
-    if (e.ctrlKey || e.shiftKey || e.metaKey) return;
+
+    /** Ctrl/Meta/Shift 组合键不处理（浏览器/系统保留行为） */
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -252,6 +316,52 @@ export const elementInspectorCode = `
     document.body.style.cursor = '';
 
     showPromptPanel(info);
+  }
+
+  /** Alt+右键：直接跳转到源码位置（不打开提示词面板）
+   *  若 currentTarget 未设置（按住修饰键期间未触发过 mousemove），从点击坐标兜底获取 */
+  function onContextMenu(e) {
+    if (!active) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    var target = currentTarget || document.elementFromPoint(e.clientX, e.clientY);
+    if (!target || target === document.body || target === document.documentElement) return;
+    var sf = target.getAttribute('data-v-pilot-file');
+    var sl = target.getAttribute('data-v-pilot-line');
+    if (sf) {
+      openInEditor(sf, sl ? parseInt(sl) : undefined);
+      flashTooltip('__LOCALE_OPENED__');
+    } else {
+      flashTooltip('__LOCALE_NO_SOURCE__');
+    }
+  }
+
+  /** 请求 dev server 打开编辑器并定位到源码位置 */
+  function openInEditor(file, line) {
+    fetch('/__pilot/open-in-editor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: file, line: line }),
+    }).catch(function() { /* 静默失败 */ });
+  }
+
+  /** 在 tooltip 位置闪现一条反馈消息 */
+  function flashTooltip(msg) {
+    if (!tooltip) createOverlay();
+    tooltip.innerHTML = '<span style="color:#34d399">' + msg + '</span>';
+    tooltip.style.display = 'block';
+    if (currentTarget) {
+      var rect = currentTarget.getBoundingClientRect();
+      var zoom = getBodyZoom();
+      tooltip.style.left = ((rect.left + rect.width) / zoom + 8) + 'px';
+      tooltip.style.top = (rect.top / zoom) + 'px';
+    }
+    clearTimeout(flashTooltip._timer);
+    flashTooltip._timer = setTimeout(function() {
+      if (currentTarget) showHighlight(currentTarget);
+    }, 1200);
   }
 
   /** 显示提示词面板：用户输入描述后可复制完整提示词给 agent */
@@ -281,6 +391,7 @@ export const elementInspectorCode = `
       '<textarea id="__pilot-prompt-input" placeholder="__LOCALE_PLACEHOLDER__" style="width:100%;height:72px;background:rgba(30,41,59,0.8);border:1px solid rgba(59,130,246,0.3);border-radius:8px;padding:10px;color:#e2e8f0;font-size:13px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box;"></textarea>' +
       '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">' +
         '<span id="__pilot-prompt-timer" style="font-size:12px;color:#64748b;line-height:28px;margin-right:auto;"></span>' +
+        (info.sourceFile ? '<button id="__pilot-prompt-goto" style="padding:6px 16px;background:#0ea5e9;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">__LOCALE_GOTO_CODE__</button>' : '') +
         '<button id="__pilot-prompt-send" style="padding:6px 16px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">__LOCALE_SEND_TO_CLAUDE__</button>' +
         '<button id="__pilot-prompt-copy" style="padding:6px 16px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">__LOCALE_COPY_PROMPT__</button>' +
         '<button id="__pilot-prompt-close" style="padding:6px 16px;background:rgba(51,65,85,0.8);color:#94a3b8;border:none;border-radius:6px;cursor:pointer;font-size:13px;">__LOCALE_CLOSE__</button>' +
@@ -336,6 +447,18 @@ export const elementInspectorCode = `
         timerSpan.textContent = '';
       }
     });
+
+    /** 跳转代码按钮：请求 dev server 执行 code -g 打开编辑器并定位行号 */
+    var gotoBtn = document.getElementById('__pilot-prompt-goto');
+    if (gotoBtn) {
+      gotoBtn.onclick = function() {
+        openInEditor(info.sourceFile, info.sourceLine);
+        var original = gotoBtn.textContent;
+        gotoBtn.textContent = '__LOCALE_OPENED__';
+        gotoBtn.style.background = '#22c55e';
+        setTimeout(function() { gotoBtn.textContent = original; gotoBtn.style.background = '#0ea5e9'; }, 1500);
+      };
+    }
 
     /** 生成提示词文本 */
     function getPromptText() {
@@ -477,6 +600,10 @@ export const elementInspectorCode = `
   document.addEventListener('keyup', onAltKeyUp);
   document.addEventListener('mousemove', onMouseMove, true);
   document.addEventListener('click', onClick, true);
+  /** contextmenu 拦截 Alt+右键跳转源码 */
+  document.addEventListener('contextmenu', onContextMenu, true);
+  /** wheel 必须 passive:false 才能 preventDefault 阻止页面滚动 */
+  document.addEventListener('wheel', onWheel, { passive: false, capture: true });
   window.addEventListener('blur', onDeactivate);
   document.addEventListener('blur', onDeactivate);
 })();

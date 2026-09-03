@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import { watch as fsWatch, watchFile, existsSync, type FSWatcher } from 'fs'
 import { resolve } from 'path'
+import { execFile } from 'child_process'
 import type { ResolvedPilotOptions, ExecResult, ElementInfo } from '../types'
 import { PILOT_ENDPOINTS } from '../constants'
 import { FileBridge } from './file-bridge'
@@ -484,6 +485,24 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
           bridge.writeSelectedElement(info, instanceId)
           const prompt = generateElementPrompt(info, options.pilotDir.replace(/\/\.pilot$/, ''))
           return { success: true, prompt }
+        })
+        return
+      }
+
+      /** ---------- POST /__pilot/open-in-editor ---------- */
+      if (endpoint === '/__pilot/open-in-editor' && req.method === 'POST') {
+        handlePost<{ file: string; line?: number }>(req, res, (body) => {
+          /** 防路径穿越：只允许打开项目根目录下的文件 */
+          const projectRoot = options.pilotDir.replace(/\/\.pilot$/, '')
+          const filePath = resolve(projectRoot, body.file)
+          if (!filePath.startsWith(projectRoot)) {
+            return { success: false, error: 'path outside project' }
+          }
+          const target = body.line ? `${filePath}:${body.line}` : filePath
+          execFile('code', ['-g', target], (err) => {
+            if (err) console.warn('[pilot] open-in-editor failed:', err.message)
+          })
+          return { success: true, target }
         })
         return
       }

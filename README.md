@@ -55,6 +55,8 @@ npx pilot status                # List connected instances
 - **Multi-Tab Support** — 10 tabs open? AI can switch between them freely
 - **Vue/React Aware** — Handles v-model and framework quirks so forms actually work
 - **Alt+Click Inspector** — Click any element to generate a prompt telling AI "change this"
+- **Alt+Scroll Parent/Child** — While in Alt-select mode, scroll up/down to switch between parent and child elements for precise targeting
+- **Alt+Right-Click Go to Code** — While in Alt-select mode, right-click any element to open VS Code at the exact source line
 - **Browser Push-Back** — Send prompts from the browser directly to Claude Code, no copy-paste
 
 ## How's This Different from Chrome DevTools MCP?

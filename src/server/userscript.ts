@@ -42,6 +42,9 @@ function replacePlaceholders(code: string, options: ResolvedPilotOptions, pilotV
     .replace(/__LOCALE_POSITION__/g, '')
     .replace(/__LOCALE_TEXT_CONTENT__/g, '')
     .replace(/__LOCALE_STYLE__/g, '')
+    .replace(/__LOCALE_GOTO_CODE__/g, '')
+    .replace(/__LOCALE_OPENED__/g, '')
+    .replace(/__LOCALE_NO_SOURCE__/g, '')
     .replace(/__PILOT_INSTANCE_TYPE__/g, "'userscript'")
 }
 

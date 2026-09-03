@@ -29,6 +29,9 @@ const LOCALES = {
     position: '位置',
     textContent: '文本',
     style: '样式',
+    gotoCode: '跳转代码',
+    opened: '已打开',
+    noSource: '无源码位置',
   },
   en: {
     selected: 'Selected',
@@ -53,6 +56,9 @@ const LOCALES = {
     position: 'Position',
     textContent: 'Text',
     style: 'Style',
+    gotoCode: 'Go to Code',
+    opened: 'Opened',
+    noSource: 'No source location',
   },
 } as const
 
@@ -102,6 +108,9 @@ export function buildInjectScript(options: ResolvedPilotOptions, pilotVersion?: 
         .replace(/__LOCALE_POSITION__/g, locale.position)
         .replace(/__LOCALE_TEXT_CONTENT__/g, locale.textContent)
         .replace(/__LOCALE_STYLE__/g, locale.style)
+        .replace(/__LOCALE_GOTO_CODE__/g, locale.gotoCode)
+        .replace(/__LOCALE_OPENED__/g, locale.opened)
+        .replace(/__LOCALE_NO_SOURCE__/g, locale.noSource)
       return `  /* === ${name} === */\n  ${resolved.trim()}`
     })
     .join('\n\n')
