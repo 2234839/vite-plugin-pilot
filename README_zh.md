@@ -147,6 +147,10 @@ pnpm dev
 # /html/ — 原生 JS playground
 ```
 
+## 相关项目
+
+- [SilkPulse](https://github.com/2234839/silkpulse) — 同作者的远程调试工具，让 AI 远程查看和调试你的前端/网页，甚至线上页面。在线体验：[silkpulse.heartstack.space](https://silkpulse.heartstack.space)
+
 ## 致谢
 
 特别感谢 [LINUX DO](https://linux.do/) 社区，宝贵的反馈和讨论推动了项目的持续演进。

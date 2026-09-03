@@ -152,6 +152,10 @@ pnpm dev
 # /html/ — Vanilla JS playground
 ```
 
+## Related Projects
+
+- [SilkPulse](https://github.com/2234839/silkpulse) — A remote debugging tool by the same author. Let AI remotely inspect and debug your frontend/web pages and even production sites. Try it online at [silkpulse.heartstack.space](https://silkpulse.heartstack.space).
+
 ## Thanks
 
 Special thanks to [LINUX DO](https://linux.do/) community for the valuable feedback and discussions that helped shape this project.
