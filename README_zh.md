@@ -14,6 +14,8 @@
 
 **[English](./README.md)** | 简体中文
 
+[![扫码加入开发者社群](https://tsfullstack.heartstack.space/group/gs.svg?from=vite-plugin-pilot)](https://tsfullstack.heartstack.space/group/gs?from=vite-plugin-pilot)
+
 ## 快速开始
 
 ### 方式一：Vite 插件模式

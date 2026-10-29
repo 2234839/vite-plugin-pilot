@@ -19,6 +19,8 @@ When you're coding with Claude Code or Cursor, you used to switch to the browser
 
 **[简体中文](./README_zh.md)** | English
 
+[![扫码加入开发者社群](https://tsfullstack.heartstack.space/group/gs.svg?from=vite-plugin-pilot)](https://tsfullstack.heartstack.space/group/gs?from=vite-plugin-pilot)
+
 ## Quick Start
 
 ### Option 1: Vite Plugin Mode
