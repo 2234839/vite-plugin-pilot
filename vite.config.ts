@@ -13,7 +13,7 @@ export default defineConfig({
       fileName: (_format, entryName) => entryName === 'bin/pilot' ? 'bin/pilot.js' : 'index.js',
     },
     rollupOptions: {
-      external: ['vite', 'fs', 'path', 'http', 'https', '@vue/compiler-dom', 'magic-string'],
+      external: ['vite', 'fs', 'path', 'http', 'https', 'child_process', '@vue/compiler-dom', 'magic-string'],
       /** 生成 TypeScript 类型声明文件 */
       plugins: [
         {

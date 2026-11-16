@@ -35,7 +35,8 @@ let lastPilotTime = 0
 function pilot(cmd: string): string {
   const elapsed = Date.now() - lastPilotTime
   if (elapsed < 800) {
-    execSync('sleep 0.8', { timeout: 2000 })
+    /** 跨平台同步等待 800ms（Windows 无 sleep 命令） */
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800)
   }
   lastPilotTime = Date.now()
   const prefix = instancePrefix ? `instance:${instancePrefix} ` : ''
