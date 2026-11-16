@@ -125,33 +125,33 @@ function runBasicTests(framework: string) {
 
   // ===== 2. 纯代码执行 =====
   console.log(`\n=== 2. 纯代码执行 [${label}] ===`)
-  matches('2.1 1+1', "run '1+1' nopage", /^--- runcode.*\n2$/m)
-  matches('2.2 title', "run 'document.title' nopage", /Pilot Playground/)
-  matches('2.3 async', "run 'await __pilot_wait(50); \"done\"' nopage", /done/)
+  matches('2.1 1+1', "run 'return 1+1' nopage", /^2$/m)
+  matches('2.2 title', "run 'return document.title' nopage", /Pilot Playground/)
+  matches('2.3 async', "run 'await __pilot_wait(50); return \"done\"' nopage", /done/)
   matches('2.4 error', "run 'throw new Error(\"test\")' nopage", /ERROR:/)
-  notMatches('2.5 no undef', "run 'void 0' nopage", /^undefined$/m)
+  notMatches('2.5 no undef', "run 'return void 0' nopage", /^undefined$/m)
 
   // ===== 3. 文本匹配操作（通用） =====
   console.log(`\n=== 3. 文本匹配操作 [${label}] ===`)
   /** 搜索文本根据框架选择（React playground 没有 "添加" 按钮） */
   const searchText = framework === 'react' ? '任务 A' : '添加'
-  matches('3.1 findByText ok', `run '__pilot_findByText("${searchText}")' nologs`, /idx[\s\S]*tag[\s\S]*text/)
-  matches('3.2 findByText fail', "run '__pilot_findByText(\"不存在xyzabc\")' nologs", /No element found/)
+  matches('3.1 findByText ok', `run 'return __pilot_findByText("${searchText}")' nologs`, /idx[\s\S]*tag[\s\S]*text/)
+  matches('3.2 findByText fail', "run 'return __pilot_findByText(\"不存在xyzabc\")' nologs", /No element found/)
 
   if (framework === 'html') {
     /** HTML playground 特有元素 */
-    matches('3.3 clickByText(添加)', "run '__pilot_clickByText(\"添加\")' nologs", /Clicked BUTTON#\d+ "添加"/)
-    matches('3.4 typeByPlaceholder', "run 'await __pilot_typeByPlaceholder(\"输入新任务\", \"HTML测试\")' nologs", /Set INPUT#\d+/)
-    matches('3.5 clickByText(面板)', "run '__pilot_clickByText(\"面板 B\")' nologs", /Clicked BUTTON#\d+ "面板 B"/)
-    matches('3.6 selectValueByText', "run '__pilot_selectValueByText(\"设计师\")' nologs", /Selected "设计师"/)
-    matches('3.7 checkByText', "run '__pilot_checkByText(\"同意条款\")' nologs", /Checked INPUT#\d+/)
-    matches('3.8 dblclickByText', "run '__pilot_dblclickByText(\"学习 JavaScript\")' nologs", /DblClicked/)
+    matches('3.3 clickByText(添加)', "run 'return __pilot_clickByText(\"添加\")' nologs", /Clicked BUTTON#\d+ "添加"/)
+    matches('3.4 typeByPlaceholder', "run 'return await __pilot_typeByPlaceholder(\"输入新任务\", \"HTML测试\")' nologs", /Set INPUT#\d+/)
+    matches('3.5 clickByText(面板)', "run 'return __pilot_clickByText(\"面板 B\")' nologs", /Clicked BUTTON#\d+ "面板 B"/)
+    matches('3.6 selectValueByText', "run 'return __pilot_selectValueByText(\"设计师\")' nologs", /Selected "设计师"/)
+    matches('3.7 checkByText', "run 'return __pilot_checkByText(\"同意条款\")' nologs", /Checked INPUT#\d+/)
+    matches('3.8 dblclickByText', "run 'return __pilot_dblclickByText(\"学习 JavaScript\")' nologs", /DblClicked/)
     /** HTML 响应式验证（原生 JS 无 v-model，但 input 事件监听器应能正确触发） */
     matches('3.9 input 值更新', "run '__pilot_setValueByPlaceholder(\"输入新任务\", \"HTML响应式\"); await __pilot_wait(100)' nologs", /input.*val=HTML响应式/)
   } else if (framework === 'react') {
     /** React playground 特有元素 */
-    matches('3.3 clickByText(console.log)', "run '__pilot_clickByText(\"console.log\")' nologs", /Clicked BUTTON#\d+ "console.log"/)
-    matches('3.4 dblclickByText', "run '__pilot_dblclickByText(\"任务 A\")' nologs", /DblClicked/)
+    matches('3.3 clickByText(console.log)', "run 'return __pilot_clickByText(\"console.log\")' nologs", /Clicked BUTTON#\d+ "console.log"/)
+    matches('3.4 dblclickByText', "run 'return __pilot_dblclickByText(\"任务 A\")' nologs", /DblClicked/)
     /** React 响应式验证（useState 绑定的 input 值通过 input 事件正确更新） */
     matches('3.5 input 响应式', "run '__pilot_setValueByPlaceholder(\"请输入姓名\", \"React测试\"); await __pilot_wait(100)' nologs", /input.*val=React测试/)
     matches('3.6 select 响应式', "run '__pilot_selectValueByText(\"设计师\"); await __pilot_wait(100)' nologs", /select.*check=设计师/)
@@ -164,7 +164,7 @@ function runBasicTests(framework: string) {
   notMatches('4.2 无操作无·', "run 'document.title' nologs", /  ·/)
 
   const clickTarget = framework === 'react' ? 'console.log' : framework === 'html' ? '添加' : '添加'
-  matches('4.3 → 标记', `run '__pilot_clickByText("${clickTarget}")' nologs`, /^→ button/m)
+  matches('4.3 → 标记', `run 'return __pilot_clickByText("${clickTarget}")' nologs`, /^→ button/m)
   /** · 折叠只在元素足够多时出现（Vue playground），React/HTML playground 元素少不检查 */
   if (framework === 'vue') {
     matches('4.4 · 折叠', `run '__pilot_clickByText("${clickTarget}")' nologs`, /  ·/)
@@ -172,14 +172,14 @@ function runBasicTests(framework: string) {
 
   // ===== 5. 错误处理 =====
   console.log(`\n=== 5. 错误处理 [${label}] ===`)
-  matches('5.1 元素不存在', "run '__pilot_clickByText(\"不存在xyz\")' nopage", /No element found/)
-  matches('5.2 idx不存在', "run '__pilot_click(99999)' nopage", /not found/)
+  matches('5.1 元素不存在', "run 'return __pilot_clickByText(\"不存在xyz\")' nopage", /No element found/)
+  matches('5.2 idx不存在', "run 'return __pilot_click(99999)' nopage", /not found/)
   matches('5.3 失败时自动snapshot', "run 'throw new Error(\"errtest\")'", /--- page snapshot ---/)
 
   // ===== 6. 输出格式 =====
   console.log(`\n=== 6. 输出格式 [${label}] ===`)
-  matches('6.1 runcode行', "run '1+1' nopage", /--- runcode ---/)
-  matches('6.2 snapshot头部', "run '1+1'", /# title:/)
+  matches('6.1 返回值标注', "run 'return 1+1' nopage", /↳ 返回值/)
+  matches('6.2 snapshot头部', "run 'return 1+1'", /# title:/)
   notMatches('6.3 nopage 无snapshot', `run '__pilot_clickByText("${clickTarget}")' nopage`, /--- page snapshot ---/)
 }
 
@@ -196,26 +196,26 @@ function runVueFullTests() {
 
   // 文本匹配操作（Vue 特有）
   console.log('\n--- 7.2 文本匹配 ---')
-  matches('7.2.1 clickByText', "run '__pilot_clickByText(\"添加\")' nologs", /Clicked BUTTON#\d+ "添加"/)
-  matches('7.2.2 typeByPlaceholder', "run 'await __pilot_typeByPlaceholder(\"姓名\", \"自动测试\")' nologs", /Set INPUT#\d+/)
-  matches('7.2.3 selectValueByText', "run '__pilot_selectValueByText(\"高优先级\")' nologs", /Selected "高优先级"/)
-  matches('7.2.4 checkByText', "run '__pilot_checkByText(\"TypeScript\")' nologs", /Checked INPUT#\d+/)
-  matches('7.2.5 uncheckByText', "run '__pilot_uncheckByText(\"TypeScript\")' nologs", /Unchecked INPUT#\d+/)
-  matches('7.2.6 setValueByPlaceholder', "run '__pilot_setValueByPlaceholder(\"姓名\", \"仅设置\")' nologs", /Set INPUT#\d+/)
-  matches('7.2.7 checkMultiple', "run 'await __pilot_uncheckByText(\"Vite\"); await __pilot_checkMultipleByText([\"Vite\", \"Tailwind\"])' nologs", /Checked.*Vite/)
-  matches('7.2.8 keydownByText', "run '__pilot_keydownByText(\"输入新任务...\", \"Escape\")' nologs", /Keydown "Escape"/)
-  matches('7.2.9 waitFor appear', "run 'await __pilot_waitFor(\"Vue\", 3000)' nopage", /Found:/)
-  matches('7.2.10 waitFor disappear', "run 'await __pilot_waitFor(\"不存在xyz\", 1000, true)' nopage", /Disappeared:/)
-  matches('7.2.11 waitEnabled', "run 'await __pilot_waitEnabled(\"添加\", 3000)' nopage", /Enabled:/)
-  matches('7.2.12 nth 越界', "run '__pilot_clickByText(\"删除\", 999)' nopage", /out of range/)
+  matches('7.2.1 clickByText', "run 'return __pilot_clickByText(\"添加\")' nologs", /Clicked BUTTON#\d+ "添加"/)
+  matches('7.2.2 typeByPlaceholder', "run 'return await __pilot_typeByPlaceholder(\"姓名\", \"自动测试\")' nologs", /Set INPUT#\d+/)
+  matches('7.2.3 selectValueByText', "run 'return __pilot_selectValueByText(\"高优先级\")' nologs", /Selected "高优先级"/)
+  matches('7.2.4 checkByText', "run 'return __pilot_checkByText(\"TypeScript\")' nologs", /Checked INPUT#\d+/)
+  matches('7.2.5 uncheckByText', "run 'return __pilot_uncheckByText(\"TypeScript\")' nologs", /Unchecked INPUT#\d+/)
+  matches('7.2.6 setValueByPlaceholder', "run 'return __pilot_setValueByPlaceholder(\"姓名\", \"仅设置\")' nologs", /Set INPUT#\d+/)
+  matches('7.2.7 checkMultiple', "run 'await __pilot_uncheckByText(\"Vite\"); return await __pilot_checkMultipleByText([\"Vite\", \"Tailwind\"])' nologs", /Checked.*Vite/)
+  matches('7.2.8 keydownByText', "run 'return __pilot_keydownByText(\"输入新任务...\", \"Escape\")' nologs", /Keydown "Escape"/)
+  matches('7.2.9 waitFor appear', "run 'return await __pilot_waitFor(\"Vue\", 3000)' nopage", /Found:/)
+  matches('7.2.10 waitFor disappear', "run 'return await __pilot_waitFor(\"不存在xyz\", 1000, true)' nopage", /Disappeared:/)
+  matches('7.2.11 waitEnabled', "run 'return await __pilot_waitEnabled(\"添加\", 3000)' nopage", /Enabled:/)
+  matches('7.2.12 nth 越界', "run 'return __pilot_clickByText(\"删除\", 999)' nopage", /out of range/)
 
   // 索引操作
   console.log('\n--- 7.3 索引操作 ---')
-  matches('7.3.1 click(idx)', "run '__pilot_click(49)' nologs", /Clicked BUTTON#49/)
-  matches('7.3.2 setValue(idx)', "run '__pilot_setValue(64, \"idx测试\")' nologs", /Set INPUT#64/)
-  matches('7.3.3 getRect(idx)', "run '__pilot_getRect(49)' nopage", /visible/)
-  matches('7.3.4 scrollIntoView', "run '__pilot_scrollIntoView(49)' nopage", /Scrolled to/)
-  matches('7.3.5 hover(idx)', "run '__pilot_hover(49)' nologs", /Hovered/)
+  matches('7.3.1 click(idx)', "run 'return __pilot_click(49)' nologs", /Clicked BUTTON#49/)
+  matches('7.3.2 setValue(idx)', "run 'return __pilot_setValue(64, \"idx测试\")' nologs", /Set INPUT#64/)
+  matches('7.3.3 getRect(idx)', "run 'return __pilot_getRect(49)' nopage", /visible/)
+  matches('7.3.4 scrollIntoView', "run 'return __pilot_scrollIntoView(49)' nopage", /Scrolled to/)
+  matches('7.3.5 hover(idx)', "run 'return __pilot_hover(49)' nologs", /Hovered/)
 
   // 上下文聚焦（Vue 完整）
   console.log('\n--- 7.4 上下文聚焦 ---')
@@ -224,11 +224,11 @@ function runVueFullTests() {
 
   // 错误处理
   console.log('\n--- 7.5 错误处理 ---')
-  matches('7.5.1 disabled元素', "run '__pilot_clickByText(\"发布评论\")' nopage", /disabled/)
+  matches('7.5.1 disabled元素', "run 'return __pilot_clickByText(\"发布评论\")' nopage", /disabled/)
 
   // 复合操作
   console.log('\n--- 7.6 复合操作 ---')
-  matches('7.6.1 多步操作', "run 'await __pilot_setValueByPlaceholder(\"姓名\", \"复合\"); __pilot_selectValueByText(\"高优先级\")' nologs", /Selected/)
+  matches('7.6.1 多步操作', "run 'await __pilot_setValueByPlaceholder(\"姓名\", \"复合\"); return __pilot_selectValueByText(\"高优先级\")' nologs", /Selected/)
 
   // 响应式验证
   console.log('\n--- 7.7 响应式验证 ---')

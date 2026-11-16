@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-pilot",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "description": "AI Agent 驾驶浏览器的导航工具 — 打通 浏览器运行时 → Dev Server → 源码 → IDE 的完整链路",
   "type": "module",
   "bin": {
@@ -42,20 +42,20 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
-    "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^6.1.1",
-    "@vitejs/plugin-vue": "^6.0.8",
-    "@vue/compiler-dom": "^3.5.42",
-    "magic-string": "^1.2.3",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.3.0",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "@vue/compiler-dom": "^3.5.45",
+    "magic-string": "^1.4.5",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2",
-    "vue": "^3.5.42",
-    "ws": "^8.21.3"
+    "vite": "^8.3.8",
+    "vue": "^3.5.45",
+    "ws": "^8.23.0"
   },
   "keywords": [
     "vite",
