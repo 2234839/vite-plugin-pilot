@@ -483,7 +483,7 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       if (endpoint === PILOT_ENDPOINTS.inspect && req.method === 'POST') {
         handlePost<ElementInfo>(req, res, (info) => {
           bridge.writeSelectedElement(info, instanceId)
-          const prompt = generateElementPrompt(info, options.pilotDir.replace(/\/\.pilot$/, ''))
+          const prompt = generateElementPrompt(info, options.pilotDir.replace(/[\\/]\.pilot$/, ''))
           return { success: true, prompt }
         })
         return
@@ -492,14 +492,20 @@ export function createMiddleware(options: ResolvedPilotOptions, pilotVersion?: s
       /** ---------- POST /__pilot/open-in-editor ---------- */
       if (endpoint === '/__pilot/open-in-editor' && req.method === 'POST') {
         handlePost<{ file: string; line?: number }>(req, res, (body) => {
-          /** 防路径穿越：只允许打开项目根目录下的文件 */
-          const projectRoot = options.pilotDir.replace(/\/\.pilot$/, '')
-          const filePath = resolve(projectRoot, body.file)
+          /** 防路径穿越：只允许打开项目根目录下的文件（兼容 Windows 反斜杠路径） */
+          const projectRoot = options.pilotDir.replace(/[\\/]\.pilot$/, '')
+          let filePath = resolve(projectRoot, body.file)
+          /** Windows 下 resolve 结果若落在 .pilot 目录内，映射回项目根，避免 startsWith 误判 */
+          if (filePath.startsWith(options.pilotDir)) {
+            filePath = projectRoot + filePath.slice(options.pilotDir.length)
+          }
           if (!filePath.startsWith(projectRoot)) {
             return { success: false, error: 'path outside project' }
           }
           const target = body.line ? `${filePath}:${body.line}` : filePath
-          execFile('code', ['-g', target], (err) => {
+          /** Windows 下路径可能含空格，需走 shell 并给路径加引号；其他平台保持原有的直接 spawn 行为 */
+          const isWin = process.platform === 'win32'
+          execFile('code', ['-g', isWin ? `"${target}"` : target], { shell: isWin }, (err) => {
             if (err) console.warn('[pilot] open-in-editor failed:', err.message)
           })
           return { success: true, target }

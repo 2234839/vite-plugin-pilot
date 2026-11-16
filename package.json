@@ -22,9 +22,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build && chmod +x dist/bin/pilot.js && node scripts/write-inject-bundle.mjs",
+    "build": "vite build && node -e \"require('fs').chmodSync('dist/bin/pilot.js',0o755)\" && node scripts/write-inject-bundle.mjs",
     "typecheck": "tsc --noEmit",
-    "dev": "vite build && chmod +x dist/bin/pilot.js && npx vite --config playground/vite.config.ts --host",
+    "dev": "vite build && node -e \"require('fs').chmodSync('dist/bin/pilot.js',0o755)\" && npx vite --config playground/vite.config.ts --host",
     "build:demo": "npx tsx playground/demo/build.ts",
     "test": "npx tsx scripts/test.ts"
   },
